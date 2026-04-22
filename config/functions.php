@@ -174,6 +174,87 @@ function extract_resume_text(string $file_path): string
 }
 
 // ─────────────────────────────────────────────
+// RESUME DATA PARSING — Mistral AI
+// ─────────────────────────────────────────────
+
+/**
+ * Parse structured resume fields from raw text using Mistral AI.
+ *
+ * @param string $text  Raw text extracted from a resume PDF
+ * @return array  ['name','email','phone','skills','education'] or empty strings on failure
+ */
+function parse_resume_data(string $text): array
+{
+    $result = [
+        'name'      => '',
+        'email'     => '',
+        'phone'     => '',
+        'skills'    => '',
+        'education' => '',
+    ];
+
+    if (!defined('MISTRAL_API_KEY') || !MISTRAL_API_KEY || trim($text) === '') {
+        return $result;
+    }
+
+    $prompt = 'You are a resume parser. Extract the following fields from the resume text below and respond ONLY in this exact JSON format, no explanation:
+{
+  "name": "Full Name",
+  "email": "email@example.com",
+  "phone": "phone number",
+  "skills": "comma-separated list of skills",
+  "education": "highest or most recent qualification — Degree, Institution, Year"
+}
+Use an empty string for any field not found. Do not include anything else in your response.
+
+RESUME TEXT:
+' . mb_substr($text, 0, 6000); // cap at 6000 chars to stay within token limits
+
+    $payload = [
+        'model'    => 'mistral-small-latest',
+        'messages' => [[
+            'role'    => 'user',
+            'content' => $prompt,
+        ]],
+        'max_tokens'  => 500,
+        'temperature' => 0,
+    ];
+
+    $ch = curl_init('https://api.mistral.ai/v1/chat/completions');
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST           => true,
+        CURLOPT_HTTPHEADER     => [
+            'Content-Type: application/json',
+            'Authorization: Bearer ' . MISTRAL_API_KEY,
+        ],
+        CURLOPT_POSTFIELDS => json_encode($payload),
+        CURLOPT_TIMEOUT    => 30,
+    ]);
+
+    $response = curl_exec($ch);
+    curl_close($ch);
+
+    if (!$response) return $result;
+
+    $data = json_decode($response, true);
+    $text_out = $data['choices'][0]['message']['content'] ?? '';
+
+    // Strip markdown code fences if present
+    $text_out = preg_replace('/^```(?:json)?\s*/i', '', trim($text_out));
+    $text_out = preg_replace('/\s*```$/', '', $text_out);
+
+    $parsed = json_decode(trim($text_out), true);
+    if (is_array($parsed)) {
+        foreach (['name', 'email', 'phone', 'skills', 'education'] as $field) {
+            $result[$field] = trim($parsed[$field] ?? '');
+        }
+    }
+
+    return $result;
+}
+
+// ─────────────────────────────────────────────
 // AADHAAR OCR — Mistral Vision
 // ─────────────────────────────────────────────
 

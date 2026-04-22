@@ -92,9 +92,12 @@ if ($existing) {
     $old_file = '../' . $existing['file_url'];
     if (file_exists($old_file)) unlink($old_file);
 
-    // Clear old aadhaar_data on re-upload
+    // Clear old extracted data on re-upload
     if ($document_type === 'aadhaar') {
         pg_query_params($conn, "DELETE FROM aadhaar_data WHERE document_id = $1", [$existing['id']]);
+    }
+    if ($document_type === 'resume') {
+        pg_query_params($conn, "DELETE FROM resume_data WHERE document_id = $1", [$existing['id']]);
     }
 
     pg_query_params($conn,
@@ -138,6 +141,37 @@ if ($document_type === 'aadhaar' && ($blur_status === 'clear' || $blur_status ==
             echo 'validation_failed:' . implode(' ', $validation['errors']);
             exit;
         }
+    }
+}
+
+// Extract and store structured data from resume
+if ($document_type === 'resume') {
+    $raw_text = extract_resume_text($file_path);
+
+    if ($raw_text !== '') {
+        $parsed = parse_resume_data($raw_text);
+
+        pg_query_params($conn,
+            "INSERT INTO resume_data (document_id, name, email, phone, skills, education)
+             VALUES ($1, $2, $3, $4, $5, $6)",
+            [
+                $document_id,
+                $parsed['name'],
+                $parsed['email'],
+                $parsed['phone'],
+                $parsed['skills'],
+                $parsed['education'],
+            ]
+        );
+        pg_query_params($conn,
+            "UPDATE documents SET processed_status = 'done' WHERE id = $1",
+            [$document_id]
+        );
+    } else {
+        pg_query_params($conn,
+            "UPDATE documents SET processed_status = 'failed' WHERE id = $1",
+            [$document_id]
+        );
     }
 }
 
