@@ -28,15 +28,12 @@ while ($row = pg_fetch_assoc($doc_result)) {
     $uploaded_types[] = $row['document_type'];
 }
 
-$doc_types = ['resume', 'cover_letter', 'id_proof', 'aadhaar'];
+$doc_types = ['resume', 'cover_letter', 'id_proof'];
 $doc_labels = [
     'resume'       => 'Resume',
     'cover_letter' => 'Cover Letter',
     'id_proof'     => 'ID Proof',
-    'aadhaar'      => 'Aadhaar Card',
 ];
-// Aadhaar is mandatory — blur detection runs on it after upload
-$mandatory_types = ['aadhaar'];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -161,28 +158,6 @@ $mandatory_types = ['aadhaar'];
             color: #c0392b;
             margin-top: 0.4rem;
         }
-
-        /* Mandatory badge on the doc label */
-        .badge-required {
-            background: #fff3e0;
-            color: #e67e22;
-            font-size: 0.72rem;
-            padding: 0.15rem 0.5rem;
-            border-radius: 20px;
-            margin-left: 0.4rem;
-            vertical-align: middle;
-            font-weight: bold;
-        }
-
-        /* Blur warning shown after aadhaar upload */
-        .badge-blurry {
-            background: #fdecea;
-            color: #c0392b;
-            padding: 0.3rem 0.7rem;
-            border-radius: 20px;
-            font-size: 0.82rem;
-            white-space: nowrap;
-        }
     </style>
 </head>
 <body>
@@ -199,18 +174,10 @@ $mandatory_types = ['aadhaar'];
     </div>
 
     <?php foreach ($doc_types as $type): ?>
-        <?php $is_mandatory = in_array($type, $mandatory_types); ?>
         <div class="doc-card">
             <div class="doc-info">
-                <h3>
-                    <?= $doc_labels[$type] ?>
-                    <?php if ($is_mandatory): ?>
-                        <span class="badge-required">Required</span>
-                    <?php endif; ?>
-                </h3>
-                <p>
-                    <?= $type === 'aadhaar' ? 'JPG, PNG, or PDF — must be clear (not blurry)' : 'PDF, JPG, or PNG' ?>
-                </p>
+                <h3><?= $doc_labels[$type] ?></h3>
+                <p>PDF, DOC, or image file</p>
             </div>
 
             <?php if (in_array($type, $uploaded_types)): ?>
@@ -255,35 +222,44 @@ async function handleUpload(e, type) {
         const res  = await fetch('save_document.php', { method: 'POST', body: new FormData(form) });
         const text = await res.text();
 
-        if (res.ok && (text.trim() === 'ok' || text.trim() === 'blurry')) {
-            const slot = document.getElementById('slot-' + type);
+        const response = text.trim();
 
-            if (text.trim() === 'blurry') {
-                // Uploaded but blurry — show warning and allow re-upload
-                slot.innerHTML =
-                    '<span class="badge-blurry">⚠ Blurry — please re-upload a clearer image</span>' +
-                    '<div id="slot-' + type + '-retry" style="margin-top:0.5rem">' +
-                    '<form class="upload-form" onsubmit="handleUpload(event,\'' + type + '\')" enctype="multipart/form-data">' +
-                    '<input type="hidden" name="token" value="' + document.querySelector('[name=token]').value + '">' +
-                    '<input type="hidden" name="document_type" value="' + type + '">' +
-                    '<input type="hidden" name="ajax" value="1">' +
-                    '<input type="file" name="file" required accept=".pdf,.jpg,.jpeg,.png">' +
-                    '<button type="submit" id="btn-' + type + '">Re-upload</button>' +
-                    '</form>' +
-                    '<div class="error-msg" id="err-' + type + '"></div></div>';
-            } else {
-                // Successfully uploaded and clear
-                slot.innerHTML = '<span class="badge-done">✔ Uploaded</span>';
-                uploadedCount++;
-                if (uploadedCount === totalDocs) {
-                    const allDone = document.createElement('div');
-                    allDone.className = 'all-done';
-                    allDone.textContent = 'All documents uploaded. Thank you!';
-                    document.querySelector('.container').appendChild(allDone);
-                }
+        // Validation failed — data extracted but invalid, prompt re-upload
+        if (res.ok && response.startsWith('validation_failed:')) {
+            const msg = response.replace('validation_failed:', '').trim();
+            errDiv.textContent = '⚠ Data invalid — ' + msg + ' Please re-upload a clearer image.';
+            btn.disabled  = false;
+            btn.innerHTML = 'Re-upload';
+
+        // Blurry image — prompt re-upload
+        } else if (res.ok && response === 'blurry') {
+            const slot = document.getElementById('slot-' + type);
+            slot.innerHTML =
+                '<span class="badge-blurry">⚠ Blurry — please re-upload a clearer image</span>' +
+                '<div style="margin-top:0.5rem">' +
+                '<form class="upload-form" onsubmit="handleUpload(event,\'' + type + '\')" enctype="multipart/form-data">' +
+                '<input type="hidden" name="token" value="' + document.querySelector('[name=token]').value + '">' +
+                '<input type="hidden" name="document_type" value="' + type + '">' +
+                '<input type="hidden" name="ajax" value="1">' +
+                '<input type="file" name="file" required accept=".pdf,.jpg,.jpeg,.png">' +
+                '<button type="submit" id="btn-' + type + '">Re-upload</button>' +
+                '</form>' +
+                '<div class="error-msg" id="err-' + type + '"></div></div>';
+
+        // Success
+        } else if (res.ok && response === 'ok') {
+            const slot = document.getElementById('slot-' + type);
+            slot.innerHTML = '<span class="badge-done">✔ Uploaded</span>';
+            uploadedCount++;
+            if (uploadedCount === totalDocs) {
+                const allDone = document.createElement('div');
+                allDone.className = 'all-done';
+                allDone.textContent = 'All documents uploaded. Thank you!';
+                document.querySelector('.container').appendChild(allDone);
             }
+
         } else {
-            errDiv.textContent = text.trim() || 'Upload failed. Please try again.';
+            errDiv.textContent = response || 'Upload failed. Please try again.';
             btn.disabled  = false;
             btn.innerHTML = 'Upload';
         }
