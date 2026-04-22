@@ -222,11 +222,34 @@ async function handleUpload(e, type) {
         const res  = await fetch('save_document.php', { method: 'POST', body: new FormData(form) });
         const text = await res.text();
 
-        if (res.ok && text.trim() === 'ok') {
-            // Replace form with badge
+        const response = text.trim();
+
+        // Validation failed — data extracted but invalid, prompt re-upload
+        if (res.ok && response.startsWith('validation_failed:')) {
+            const msg = response.replace('validation_failed:', '').trim();
+            errDiv.textContent = '⚠ Data invalid — ' + msg + ' Please re-upload a clearer image.';
+            btn.disabled  = false;
+            btn.innerHTML = 'Re-upload';
+
+        // Blurry image — prompt re-upload
+        } else if (res.ok && response === 'blurry') {
+            const slot = document.getElementById('slot-' + type);
+            slot.innerHTML =
+                '<span class="badge-blurry">⚠ Blurry — please re-upload a clearer image</span>' +
+                '<div style="margin-top:0.5rem">' +
+                '<form class="upload-form" onsubmit="handleUpload(event,\'' + type + '\')" enctype="multipart/form-data">' +
+                '<input type="hidden" name="token" value="' + document.querySelector('[name=token]').value + '">' +
+                '<input type="hidden" name="document_type" value="' + type + '">' +
+                '<input type="hidden" name="ajax" value="1">' +
+                '<input type="file" name="file" required accept=".pdf,.jpg,.jpeg,.png">' +
+                '<button type="submit" id="btn-' + type + '">Re-upload</button>' +
+                '</form>' +
+                '<div class="error-msg" id="err-' + type + '"></div></div>';
+
+        // Success
+        } else if (res.ok && response === 'ok') {
             const slot = document.getElementById('slot-' + type);
             slot.innerHTML = '<span class="badge-done">✔ Uploaded</span>';
-
             uploadedCount++;
             if (uploadedCount === totalDocs) {
                 const allDone = document.createElement('div');
@@ -234,8 +257,9 @@ async function handleUpload(e, type) {
                 allDone.textContent = 'All documents uploaded. Thank you!';
                 document.querySelector('.container').appendChild(allDone);
             }
+
         } else {
-            errDiv.textContent = text.trim() || 'Upload failed. Please try again.';
+            errDiv.textContent = response || 'Upload failed. Please try again.';
             btn.disabled  = false;
             btn.innerHTML = 'Upload';
         }

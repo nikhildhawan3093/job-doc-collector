@@ -96,11 +96,15 @@ if ($existing) {
     $document_id = pg_fetch_result(pg_query($conn, "SELECT lastval()"), 0, 0);
 }
 
-// If Aadhaar is clear — run OCR extraction via OpenAI
+// If Aadhaar is clear — run OCR extraction via OpenAI then validate
 if ($document_type === 'aadhaar' && $blur_status === 'clear') {
-    $extracted = extract_aadhaar_data($file_path);
+    $extracted   = extract_aadhaar_data($file_path);
+    $validation  = validate_aadhaar_data($extracted);
 
-    if (!empty($extracted['aadhaar_number']) || !empty($extracted['name']) || !empty($extracted['dob'])) {
+    if ($validation['valid']) {
+        // Clean aadhaar number (remove spaces before storing)
+        $extracted['aadhaar_number'] = preg_replace('/\s+/', '', $extracted['aadhaar_number']);
+
         pg_query_params($conn,
             "INSERT INTO aadhaar_data (document_id, aadhaar_number, name, dob) VALUES ($1, $2, $3, $4)",
             [$document_id, $extracted['aadhaar_number'], $extracted['name'], $extracted['dob']]
@@ -110,10 +114,16 @@ if ($document_type === 'aadhaar' && $blur_status === 'clear') {
             [$document_id]
         );
     } else {
+        // Validation failed — mark document and return validation errors to client
         pg_query_params($conn,
             "UPDATE documents SET processed_status = 'failed' WHERE id = $1",
             [$document_id]
         );
+
+        if (!empty($_POST['ajax'])) {
+            echo 'validation_failed:' . implode(' ', $validation['errors']);
+            exit;
+        }
     }
 }
 

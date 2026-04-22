@@ -329,7 +329,7 @@ if ($aadhaar_doc) {
             <p style="color:#c0392b;font-size:0.9rem;">⚠ Aadhaar image is blurry. Candidate needs to re-upload a clearer image.</p>
 
         <?php elseif ($aadhaar_doc['processed_status'] === 'failed'): ?>
-            <p style="color:#e67e22;font-size:0.9rem;">⚠ OCR extraction failed. The image may be unclear or unreadable.</p>
+            <p style="color:#e67e22;font-size:0.9rem;">⚠ Data extraction or validation failed. Possible reasons: invalid Aadhaar number, missing name, or unreadable date of birth. Please request a re-upload.</p>
 
         <?php else: ?>
             <p style="color:#888;font-size:0.9rem;">Processing pending...</p>

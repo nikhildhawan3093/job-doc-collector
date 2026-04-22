@@ -4,6 +4,57 @@
  */
 
 // ─────────────────────────────────────────────
+// AADHAAR DATA VALIDATION
+// ─────────────────────────────────────────────
+
+/**
+ * Validate extracted Aadhaar fields.
+ * Rules:
+ *   - aadhaar_number: exactly 12 digits (spaces allowed between groups)
+ *   - dob: must be a valid date (DD/MM/YYYY or YYYY-MM-DD)
+ *   - name: must not be empty
+ *
+ * @param array $data  ['aadhaar_number' => '', 'name' => '', 'dob' => '']
+ * @return array  ['valid' => bool, 'errors' => [field => message]]
+ */
+function validate_aadhaar_data(array $data): array
+{
+    $errors = [];
+
+    // Aadhaar number: strip spaces, must be exactly 12 digits
+    $number = preg_replace('/\s+/', '', $data['aadhaar_number'] ?? '');
+    if (!preg_match('/^\d{12}$/', $number)) {
+        $errors['aadhaar_number'] = 'Aadhaar number must be exactly 12 digits.';
+    }
+
+    // Name: must not be empty
+    $name = trim($data['name'] ?? '');
+    if ($name === '') {
+        $errors['name'] = 'Name must not be empty.';
+    }
+
+    // DOB: must be a valid date — accepts DD/MM/YYYY or YYYY-MM-DD
+    $dob = trim($data['dob'] ?? '');
+    if ($dob === '') {
+        $errors['dob'] = 'Date of birth must not be empty.';
+    } else {
+        $parsed = false;
+        foreach (['d/m/Y', 'Y-m-d', 'd-m-Y'] as $format) {
+            $dt = DateTime::createFromFormat($format, $dob);
+            if ($dt && $dt->format($format === 'd/m/Y' ? 'd/m/Y' : ($format === 'Y-m-d' ? 'Y-m-d' : 'd-m-Y')) === $dob) {
+                $parsed = true;
+                break;
+            }
+        }
+        if (!$parsed) {
+            $errors['dob'] = 'Date of birth is not a valid date.';
+        }
+    }
+
+    return ['valid' => empty($errors), 'errors' => $errors];
+}
+
+// ─────────────────────────────────────────────
 // BLUR DETECTION
 // ─────────────────────────────────────────────
 
