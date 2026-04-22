@@ -25,35 +25,38 @@ $result = pg_query_params($conn, "
 $applications = pg_fetch_all($result) ?: [];
 
 // For each application, fetch Aadhaar doc + extracted data + PDF report
-$aadhaar_info = [];
+$app_info = [];
 foreach ($applications as $app) {
     $aid = $app['id'];
 
-    // Aadhaar document
-    $doc = pg_fetch_assoc(pg_query_params($conn,
+    // Aadhaar document + data + pdf
+    $aadhaar_doc = pg_fetch_assoc(pg_query_params($conn,
         "SELECT * FROM documents WHERE application_id = $1 AND document_type = 'aadhaar'",
         [$aid]
     ));
+    $aadhaar_data = $aadhaar_doc
+        ? pg_fetch_assoc(pg_query_params($conn, "SELECT * FROM aadhaar_data WHERE document_id = $1", [$aadhaar_doc['id']]))
+        : null;
+    $pdf = $aadhaar_doc
+        ? pg_fetch_assoc(pg_query_params($conn, "SELECT * FROM pdf_reports WHERE document_id = $1", [$aadhaar_doc['id']]))
+        : null;
 
-    // Extracted Aadhaar data
-    $data = null;
-    if ($doc) {
-        $data = pg_fetch_assoc(pg_query_params($conn,
-            "SELECT * FROM aadhaar_data WHERE document_id = $1",
-            [$doc['id']]
-        ));
-    }
+    // Resume document + data
+    $resume_doc = pg_fetch_assoc(pg_query_params($conn,
+        "SELECT * FROM documents WHERE application_id = $1 AND document_type = 'resume'",
+        [$aid]
+    ));
+    $resume_data = $resume_doc
+        ? pg_fetch_assoc(pg_query_params($conn, "SELECT * FROM resume_data WHERE document_id = $1", [$resume_doc['id']]))
+        : null;
 
-    // PDF report
-    $pdf = null;
-    if ($doc) {
-        $pdf = pg_fetch_assoc(pg_query_params($conn,
-            "SELECT * FROM pdf_reports WHERE document_id = $1",
-            [$doc['id']]
-        ));
-    }
-
-    $aadhaar_info[$aid] = ['doc' => $doc, 'data' => $data, 'pdf' => $pdf];
+    $app_info[$aid] = [
+        'aadhaar_doc'  => $aadhaar_doc,
+        'aadhaar_data' => $aadhaar_data,
+        'resume_doc'   => $resume_doc,
+        'resume_data'  => $resume_data,
+        'pdf'          => $pdf,
+    ];
 }
 ?>
 <!DOCTYPE html>
@@ -292,12 +295,14 @@ foreach ($applications as $app) {
         <?php foreach ($applications as $i => $app):
             $aid      = $app['id'];
             $uploaded = (int)$app['uploaded'];
-            $pct      = round(($uploaded / $total_docs) * 100);
-            $complete = $uploaded >= $total_docs;
-            $info     = $aadhaar_info[$aid];
-            $doc      = $info['doc'];
-            $data     = $info['data'];
-            $pdf      = $info['pdf'];
+            $pct          = round(($uploaded / $total_docs) * 100);
+            $complete     = $uploaded >= $total_docs;
+            $info         = $app_info[$aid];
+            $aadhaar_doc  = $info['aadhaar_doc'];
+            $aadhaar_data = $info['aadhaar_data'];
+            $resume_doc   = $info['resume_doc'];
+            $resume_data  = $info['resume_data'];
+            $pdf          = $info['pdf'];
 
             $doc_types  = ['resume', 'cover_letter', 'id_proof', 'aadhaar'];
             $doc_labels = ['resume' => 'Resume', 'cover_letter' => 'Cover Letter', 'id_proof' => 'ID Proof', 'aadhaar' => 'Aadhaar'];
@@ -340,11 +345,11 @@ foreach ($applications as $app) {
                     </div>
                 </div>
 
-                <!-- Blur Status -->
+                <!-- Aadhaar Blur -->
                 <div class="detail-block">
                     <label>Aadhaar Blur</label>
-                    <?php if ($doc): ?>
-                        <?php $bs = $doc['blur_status']; ?>
+                    <?php if ($aadhaar_doc): ?>
+                        <?php $bs = $aadhaar_doc['blur_status']; ?>
                         <span class="badge badge-<?= $bs ?>">
                             <?= $bs === 'clear' ? '✔ Clear' : ($bs === 'blurry' ? '⚠ Blurry' : ucfirst($bs)) ?>
                         </span>
@@ -353,17 +358,47 @@ foreach ($applications as $app) {
                     <?php endif; ?>
                 </div>
 
-                <!-- Extracted Data -->
+                <!-- Aadhaar Extracted Data -->
                 <div class="detail-block">
-                    <label>Extracted Data</label>
-                    <?php if ($data): ?>
-                        <span style="font-size:0.85rem;color:#333;display:block;"><?= htmlspecialchars($data['name']) ?></span>
+                    <label>Aadhaar Data</label>
+                    <?php if ($aadhaar_data): ?>
+                        <span style="font-size:0.85rem;color:#333;display:block;"><?= htmlspecialchars($aadhaar_data['name']) ?></span>
                         <span style="font-size:0.82rem;color:#888;">
-                            <?= chunk_split(htmlspecialchars($data['aadhaar_number']), 4, ' ') ?> &nbsp;·&nbsp; <?= htmlspecialchars($data['dob']) ?>
+                            <?= chunk_split(htmlspecialchars($aadhaar_data['aadhaar_number']), 4, ' ') ?> &nbsp;·&nbsp; <?= htmlspecialchars($aadhaar_data['dob']) ?>
                         </span>
-                    <?php elseif ($doc && $doc['processed_status'] === 'failed'): ?>
+                    <?php elseif ($aadhaar_doc && $aadhaar_doc['processed_status'] === 'failed'): ?>
                         <span class="badge badge-failed">Extraction failed</span>
-                    <?php elseif ($doc && $doc['processed_status'] === 'pending'): ?>
+                    <?php elseif ($aadhaar_doc && $aadhaar_doc['processed_status'] === 'pending'): ?>
+                        <span class="badge badge-pending">Pending</span>
+                    <?php else: ?>
+                        <span class="badge badge-missing">—</span>
+                    <?php endif; ?>
+                </div>
+
+                <!-- Resume Extracted Data -->
+                <div class="detail-block">
+                    <label>Resume Data</label>
+                    <?php if ($resume_data): ?>
+                        <span style="font-size:0.85rem;color:#333;font-weight:600;display:block;"><?= htmlspecialchars($resume_data['name']) ?></span>
+                        <span style="font-size:0.82rem;color:#888;display:block;"><?= htmlspecialchars($resume_data['email']) ?> &nbsp;·&nbsp; <?= htmlspecialchars($resume_data['phone']) ?></span>
+                        <?php if ($resume_data['latest_role'] || $resume_data['latest_company']): ?>
+                            <span style="font-size:0.82rem;color:#555;display:block;margin-top:0.2rem;">
+                                <?= htmlspecialchars($resume_data['latest_role']) ?>
+                                <?php if ($resume_data['latest_company']): ?>
+                                    @ <?= htmlspecialchars($resume_data['latest_company']) ?>
+                                <?php endif; ?>
+                                <span style="color:#aaa;">(<?= htmlspecialchars($resume_data['latest_start_date']) ?> – <?= htmlspecialchars($resume_data['latest_end_date']) ?>)</span>
+                            </span>
+                        <?php endif; ?>
+                        <?php if ($resume_data['skills']): ?>
+                            <span style="font-size:0.78rem;color:#4a90e2;display:block;margin-top:0.2rem;"><?= htmlspecialchars(mb_substr($resume_data['skills'], 0, 80)) ?><?= strlen($resume_data['skills']) > 80 ? '…' : '' ?></span>
+                        <?php endif; ?>
+                        <?php if ($resume_data['education']): ?>
+                            <span style="font-size:0.78rem;color:#888;display:block;"><?= htmlspecialchars($resume_data['education']) ?></span>
+                        <?php endif; ?>
+                    <?php elseif ($resume_doc && $resume_doc['processed_status'] === 'failed'): ?>
+                        <span class="badge badge-failed">Extraction failed</span>
+                    <?php elseif ($resume_doc && $resume_doc['processed_status'] === 'pending'): ?>
                         <span class="badge badge-pending">Pending</span>
                     <?php else: ?>
                         <span class="badge badge-missing">—</span>
@@ -374,13 +409,13 @@ foreach ($applications as $app) {
                 <div class="detail-block">
                     <label>PDF Report</label>
                     <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.2rem;">
-                        <?php if ($doc && $doc['processed_status'] === 'done'): ?>
+                        <?php if ($aadhaar_doc && $aadhaar_doc['processed_status'] === 'done'): ?>
                             <a class="btn-pdf" href="generate_report.php?id=<?= $aid ?>">⬇ Generate</a>
                         <?php endif; ?>
                         <?php if ($pdf): ?>
                             <a class="btn-pdf-dl" href="../<?= htmlspecialchars($pdf['pdf_path']) ?>" download>Download</a>
                         <?php endif; ?>
-                        <?php if (!$doc || $doc['processed_status'] !== 'done'): ?>
+                        <?php if (!$aadhaar_doc || $aadhaar_doc['processed_status'] !== 'done'): ?>
                             <span style="font-size:0.82rem;color:#aaa;">Not available</span>
                         <?php endif; ?>
                     </div>
