@@ -1,5 +1,6 @@
 <?php
 require_once '../config/db.php';
+require_once '../config/functions.php';
 
 $token         = $_POST['token'] ?? '';
 $document_type = $_POST['document_type'] ?? '';
@@ -57,7 +58,15 @@ if (!move_uploaded_file($file['tmp_name'], $file_path)) {
 
 $file_url = 'uploads/' . $filename;
 
-// Check if document already exists
+// Run blur detection for Aadhaar uploads
+$blur_status      = 'pending';
+$processed_status = 'pending';
+
+if ($document_type === 'aadhaar') {
+    $blur_status = detect_blur($file_path);
+}
+
+// Check if document already exists (re-upload)
 $existing = pg_fetch_assoc(pg_query_params($conn,
     "SELECT * FROM documents WHERE application_id = $1 AND document_type = $2",
     [$application['id'], $document_type]
@@ -69,21 +78,22 @@ if ($existing) {
     if (file_exists($old_file)) {
         unlink($old_file);
     }
-    // Update DB record
+    // Update record with new file + reset statuses
     pg_query_params($conn,
-        "UPDATE documents SET file_url = $1, uploaded_at = CURRENT_TIMESTAMP WHERE id = $2",
-        [$file_url, $existing['id']]
+        "UPDATE documents SET file_url = $1, blur_status = $2, processed_status = $3, uploaded_at = CURRENT_TIMESTAMP WHERE id = $4",
+        [$file_url, $blur_status, $processed_status, $existing['id']]
     );
 } else {
     // Insert new record
     pg_query_params($conn,
-        "INSERT INTO documents (application_id, document_type, file_url) VALUES ($1, $2, $3)",
-        [$application['id'], $document_type, $file_url]
+        "INSERT INTO documents (application_id, document_type, file_url, blur_status, processed_status) VALUES ($1, $2, $3, $4, $5)",
+        [$application['id'], $document_type, $file_url, $blur_status, $processed_status]
     );
 }
 
+// For Aadhaar: tell the client if the image is blurry so it can prompt re-upload
 if (!empty($_POST['ajax'])) {
-    echo 'ok';
+    echo ($document_type === 'aadhaar' && $blur_status === 'blurry') ? 'blurry' : 'ok';
 } else {
     header('Location: upload.php?token=' . urlencode($token));
 }
