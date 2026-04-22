@@ -48,6 +48,15 @@ if (!$aadhaar) {
     die("Aadhaar extracted data not found.");
 }
 
+// Fetch resume extracted data (optional — included if available)
+$resume_doc = pg_fetch_assoc(pg_query_params($conn,
+    "SELECT * FROM documents WHERE application_id = $1 AND document_type = 'resume' AND processed_status = 'done'",
+    [$application_id]
+));
+$resume = $resume_doc
+    ? pg_fetch_assoc(pg_query_params($conn, "SELECT * FROM resume_data WHERE document_id = $1", [$resume_doc['id']]))
+    : null;
+
 // ─── Build PDF using FPDF ───
 
 $pdf = new FPDF();
@@ -90,6 +99,35 @@ _pdf_row($pdf, 'Blur Status',     ucfirst($doc['blur_status']));
 _pdf_row($pdf, 'Extracted On',    date('d M Y', strtotime($aadhaar['extracted_at'])));
 
 $pdf->Ln(6);
+
+// Section: Resume Details (only if extracted)
+if ($resume) {
+    _pdf_section_title($pdf, 'Resume Details');
+
+    _pdf_row($pdf, 'Name',      $resume['name']);
+    _pdf_row($pdf, 'Email',     $resume['email']);
+    _pdf_row($pdf, 'Phone',     $resume['phone']);
+    _pdf_row($pdf, 'Education', $resume['education']);
+
+    // Skills — may be long, use MultiCell
+    $pdf->SetFont('Arial', 'B', 9);
+    $pdf->SetTextColor(100, 100, 100);
+    $pdf->Cell(55, 7, 'Skills:', 0, 0);
+    $pdf->SetFont('Arial', '', 9);
+    $pdf->SetTextColor(33, 33, 33);
+    $pdf->MultiCell(0, 6, $resume['skills']);
+
+    if ($resume['latest_company'] || $resume['latest_role']) {
+        $pdf->Ln(2);
+        _pdf_section_title($pdf, 'Latest Experience');
+        _pdf_row($pdf, 'Company',    $resume['latest_company']);
+        _pdf_row($pdf, 'Role',       $resume['latest_role']);
+        _pdf_row($pdf, 'Start Date', $resume['latest_start_date']);
+        _pdf_row($pdf, 'End Date',   $resume['latest_end_date']);
+    }
+
+    $pdf->Ln(6);
+}
 
 // Footer
 $pdf->SetY(-20);
