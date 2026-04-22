@@ -143,7 +143,38 @@ function _detect_blur_gd(string $file_path, float $threshold): string
 }
 
 // ─────────────────────────────────────────────
-// AADHAAR OCR — OpenAI GPT-4o Vision
+// RESUME TEXT EXTRACTION — smalot/pdfparser
+// ─────────────────────────────────────────────
+
+/**
+ * Extract raw text from a PDF resume using smalot/pdfparser.
+ *
+ * @param string $file_path  Absolute or relative path to the PDF file
+ * @return string  Extracted plain text, or empty string on failure
+ */
+function extract_resume_text(string $file_path): string
+{
+    $autoload = __DIR__ . '/../vendor/autoload.php';
+    if (!file_exists($autoload)) {
+        return '';
+    }
+    require_once $autoload;
+
+    try {
+        $parser   = new \Smalot\PdfParser\Parser();
+        $pdf      = $parser->parseFile($file_path);
+        $text     = $pdf->getText();
+
+        // Normalise whitespace: collapse multiple blank lines, trim
+        $text = preg_replace('/\n{3,}/', "\n\n", $text);
+        return trim($text);
+    } catch (\Exception $e) {
+        return '';
+    }
+}
+
+// ─────────────────────────────────────────────
+// AADHAAR OCR — Mistral Vision
 // ─────────────────────────────────────────────
 
 /**
@@ -157,49 +188,46 @@ function extract_aadhaar_data(string $file_path): array
 {
     $result = ['aadhaar_number' => '', 'name' => '', 'dob' => ''];
 
-    // PDFs cannot be sent as vision images
-    $ext = strtolower(pathinfo($file_path, PATHINFO_EXTENSION));
-    if ($ext === 'pdf') {
+    if (!defined('MISTRAL_API_KEY') || !MISTRAL_API_KEY) {
         return $result;
     }
 
-    if (!defined('OPENAI_API_KEY') || !OPENAI_API_KEY) {
-        return $result;
-    }
+    $ext        = strtolower(pathinfo($file_path, PATHINFO_EXTENSION));
+    $file_data  = base64_encode(file_get_contents($file_path));
+    $mime_type  = match($ext) {
+        'pdf'  => 'application/pdf',
+        'png'  => 'image/png',
+        default => 'image/jpeg',
+    };
 
-    // Encode image as base64
-    $image_data = base64_encode(file_get_contents($file_path));
-    $mime_type  = ($ext === 'png') ? 'image/png' : 'image/jpeg';
+    $prompt = 'This is an Indian Aadhaar card. Extract the following fields and respond ONLY in this exact JSON format, no explanation:
+{"aadhaar_number": "XXXX XXXX XXXX", "name": "Full Name", "dob": "DD/MM/YYYY"}
+If a field is not visible, use an empty string. Do not include anything else in your response.';
+
+    // PDFs use document_url type, images use image_url type
+    $media_part = ($ext === 'pdf')
+        ? ['type' => 'document_url', 'document_url' => "data:{$mime_type};base64,{$file_data}"]
+        : ['type' => 'image_url',    'image_url'    => ['url' => "data:{$mime_type};base64,{$file_data}"]];
 
     $payload = [
-        'model'      => 'gpt-4o',
-        'max_tokens' => 300,
-        'messages'   => [[
+        'model'    => 'pixtral-12b-2409',
+        'messages' => [[
             'role'    => 'user',
             'content' => [
-                [
-                    'type' => 'text',
-                    'text' =>
-                        'This is an Indian Aadhaar card. Extract the following fields and respond ONLY in this exact JSON format, no explanation:
-{"aadhaar_number": "XXXX XXXX XXXX", "name": "Full Name", "dob": "DD/MM/YYYY"}
-If a field is not visible, use an empty string. Do not include anything else in your response.'
-                ],
-                [
-                    'type'      => 'image_url',
-                    'image_url' => ['url' => "data:{$mime_type};base64,{$image_data}"]
-                ]
+                ['type' => 'text', 'text' => $prompt],
+                $media_part,
             ]
-        ]]
+        ]],
+        'max_tokens' => 300,
     ];
 
-    // Call OpenAI API
-    $ch = curl_init('https://api.openai.com/v1/chat/completions');
+    $ch = curl_init('https://api.mistral.ai/v1/chat/completions');
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_POST           => true,
         CURLOPT_HTTPHEADER     => [
             'Content-Type: application/json',
-            'Authorization: Bearer ' . OPENAI_API_KEY,
+            'Authorization: Bearer ' . MISTRAL_API_KEY,
         ],
         CURLOPT_POSTFIELDS => json_encode($payload),
         CURLOPT_TIMEOUT    => 30,
@@ -213,7 +241,10 @@ If a field is not visible, use an empty string. Do not include anything else in 
     $data = json_decode($response, true);
     $text = $data['choices'][0]['message']['content'] ?? '';
 
-    // Parse the JSON response from GPT
+    // Strip markdown code fences if model wraps the JSON
+    $text = preg_replace('/^```(?:json)?\s*/i', '', trim($text));
+    $text = preg_replace('/\s*```$/', '', $text);
+
     $parsed = json_decode(trim($text), true);
     if (is_array($parsed)) {
         $result['aadhaar_number'] = $parsed['aadhaar_number'] ?? '';
