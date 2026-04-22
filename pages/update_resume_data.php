@@ -9,7 +9,8 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 $fields = ['name', 'email', 'phone', 'skills', 'education',
-           'latest_company', 'latest_role', 'latest_start_date', 'latest_end_date'];
+           'latest_company', 'latest_role', 'latest_start_date', 'latest_end_date',
+           'address', 'linkedin', 'github'];
 
 $data = [];
 foreach ($fields as $f) {
@@ -38,14 +39,16 @@ pg_query_params($conn, "DELETE FROM resume_data WHERE document_id = $1", [$docum
 pg_query_params($conn,
     "INSERT INTO resume_data
         (document_id, name, email, phone, skills, education,
-         latest_company, latest_role, latest_start_date, latest_end_date)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+         latest_company, latest_role, latest_start_date, latest_end_date,
+         address, linkedin, github)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
     [
         $document_id,
         $data['name'], $data['email'], $data['phone'],
         $data['skills'], $data['education'],
         $data['latest_company'], $data['latest_role'],
         $data['latest_start_date'], $data['latest_end_date'],
+        $data['address'], $data['linkedin'], $data['github'],
     ]
 );
 pg_query_params($conn,

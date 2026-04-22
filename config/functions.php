@@ -246,6 +246,9 @@ function parse_resume_data(string $text): array
         'latest_role'       => '',
         'latest_start_date' => '',
         'latest_end_date'   => '',
+        'address'           => '',
+        'linkedin'          => '',
+        'github'            => '',
     ];
 
     if (!defined('MISTRAL_API_KEY') || !MISTRAL_API_KEY || trim($text) === '') {
@@ -262,7 +265,10 @@ function parse_resume_data(string $text): array
   "latest_company": "Company Name",
   "latest_role": "Job Title",
   "latest_start_date": "Mon YYYY",
-  "latest_end_date": "Mon YYYY or Present"
+  "latest_end_date": "Mon YYYY or Present",
+  "address": "City, State, Country or full address",
+  "linkedin": "linkedin.com/in/username or full URL",
+  "github": "github.com/username or full URL"
 }
 
 Rules for latest experience:

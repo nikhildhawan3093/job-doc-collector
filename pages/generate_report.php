@@ -107,6 +107,9 @@ if ($resume) {
     _pdf_row($pdf, 'Name',      $resume['name']);
     _pdf_row($pdf, 'Email',     $resume['email']);
     _pdf_row($pdf, 'Phone',     $resume['phone']);
+    if (!empty($resume['address']))  _pdf_row($pdf, 'Address',  $resume['address']);
+    if (!empty($resume['linkedin'])) _pdf_row($pdf, 'LinkedIn', $resume['linkedin']);
+    if (!empty($resume['github']))   _pdf_row($pdf, 'GitHub',   $resume['github']);
     _pdf_row($pdf, 'Education', $resume['education']);
 
     // Skills — may be long, use MultiCell

@@ -156,8 +156,9 @@ if ($document_type === 'resume') {
             pg_query_params($conn,
                 "INSERT INTO resume_data
                     (document_id, name, email, phone, skills, education,
-                     latest_company, latest_role, latest_start_date, latest_end_date)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+                     latest_company, latest_role, latest_start_date, latest_end_date,
+                     address, linkedin, github)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
                 [
                     $document_id,
                     $parsed['name'],
@@ -169,6 +170,9 @@ if ($document_type === 'resume') {
                     $parsed['latest_role'],
                     $parsed['latest_start_date'],
                     $parsed['latest_end_date'],
+                    $parsed['address'],
+                    $parsed['linkedin'],
+                    $parsed['github'],
                 ]
             );
             pg_query_params($conn,

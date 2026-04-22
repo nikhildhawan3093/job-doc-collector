@@ -425,6 +425,24 @@ $report_generated = isset($_GET['report']) && $_GET['report'] === 'generated';
                 <label>Skills</label>
                 <span><?= htmlspecialchars($resume_data['skills']) ?></span>
             </div>
+            <?php if ($resume_data['address']): ?>
+            <div class="info-item" style="grid-column:1/-1;">
+                <label>Address</label>
+                <span><?= htmlspecialchars($resume_data['address']) ?></span>
+            </div>
+            <?php endif; ?>
+            <?php if ($resume_data['linkedin']): ?>
+            <div class="info-item">
+                <label>LinkedIn</label>
+                <span><?= htmlspecialchars($resume_data['linkedin']) ?></span>
+            </div>
+            <?php endif; ?>
+            <?php if ($resume_data['github']): ?>
+            <div class="info-item">
+                <label>GitHub</label>
+                <span><?= htmlspecialchars($resume_data['github']) ?></span>
+            </div>
+            <?php endif; ?>
         </div>
 
         <?php if ($resume_data['latest_company'] || $resume_data['latest_role']): ?>
@@ -467,6 +485,9 @@ $report_generated = isset($_GET['report']) && $_GET['report'] === 'generated';
                 <div class="info-item"><label>Latest Role</label><input class="field-edit" style="display:block;" id="rm-latest_role" placeholder="Job Title" required></div>
                 <div class="info-item"><label>Start Date</label><input class="field-edit" style="display:block;" id="rm-latest_start_date" placeholder="Jan 2022"></div>
                 <div class="info-item"><label>End Date</label><input class="field-edit" style="display:block;" id="rm-latest_end_date" placeholder="Dec 2024 or Present"></div>
+                <div class="info-item" style="grid-column:1/-1;"><label>Address</label><input class="field-edit" style="display:block;" id="rm-address" placeholder="City, State, Country"></div>
+                <div class="info-item"><label>LinkedIn</label><input class="field-edit" style="display:block;" id="rm-linkedin" placeholder="linkedin.com/in/username"></div>
+                <div class="info-item"><label>GitHub</label><input class="field-edit" style="display:block;" id="rm-github" placeholder="github.com/username"></div>
             </div>
             <button type="submit" class="btn-save" style="display:inline-block;">Save Manually</button>
             <p class="save-msg" id="resume-save-msg"></p>
@@ -664,7 +685,8 @@ async function saveResumeManual(e, document_id) {
     const body = new FormData();
     body.append('document_id',        document_id);
     ['name','email','phone','skills','education',
-     'latest_company','latest_role','latest_start_date','latest_end_date'].forEach(f => {
+     'latest_company','latest_role','latest_start_date','latest_end_date',
+     'address','linkedin','github'].forEach(f => {
         const el = document.getElementById('rm-' + f);
         if (el) body.append(f, el.value.trim());
     });

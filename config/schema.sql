@@ -49,6 +49,9 @@ CREATE TABLE resume_data (
     latest_role       VARCHAR(255),
     latest_start_date VARCHAR(20),
     latest_end_date   VARCHAR(20),
+    address           TEXT,
+    linkedin          VARCHAR(255),
+    github            VARCHAR(255),
     extracted_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
