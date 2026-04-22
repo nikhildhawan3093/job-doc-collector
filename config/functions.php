@@ -186,11 +186,15 @@ function extract_resume_text(string $file_path): string
 function parse_resume_data(string $text): array
 {
     $result = [
-        'name'      => '',
-        'email'     => '',
-        'phone'     => '',
-        'skills'    => '',
-        'education' => '',
+        'name'              => '',
+        'email'             => '',
+        'phone'             => '',
+        'skills'            => '',
+        'education'         => '',
+        'latest_company'    => '',
+        'latest_role'       => '',
+        'latest_start_date' => '',
+        'latest_end_date'   => '',
     ];
 
     if (!defined('MISTRAL_API_KEY') || !MISTRAL_API_KEY || trim($text) === '') {
@@ -203,12 +207,21 @@ function parse_resume_data(string $text): array
   "email": "email@example.com",
   "phone": "phone number",
   "skills": "comma-separated list of skills",
-  "education": "highest or most recent qualification — Degree, Institution, Year"
+  "education": "most recent qualification — Degree, Institution, Year",
+  "latest_company": "Company Name",
+  "latest_role": "Job Title",
+  "latest_start_date": "Mon YYYY",
+  "latest_end_date": "Mon YYYY or Present"
 }
-Use an empty string for any field not found. Do not include anything else in your response.
+
+Rules for latest experience:
+- If any job has end date "Present", "Current", or "Till Date" → that is the latest experience.
+- If no current job exists → pick the job with the most recent end date.
+- Use an empty string for any field not found.
+- Do not include anything else in your response.
 
 RESUME TEXT:
-' . mb_substr($text, 0, 6000); // cap at 6000 chars to stay within token limits
+' . mb_substr($text, 0, 6000);
 
     $payload = [
         'model'    => 'mistral-small-latest',
@@ -237,7 +250,7 @@ RESUME TEXT:
 
     if (!$response) return $result;
 
-    $data = json_decode($response, true);
+    $data     = json_decode($response, true);
     $text_out = $data['choices'][0]['message']['content'] ?? '';
 
     // Strip markdown code fences if present
@@ -246,8 +259,10 @@ RESUME TEXT:
 
     $parsed = json_decode(trim($text_out), true);
     if (is_array($parsed)) {
-        foreach (['name', 'email', 'phone', 'skills', 'education'] as $field) {
-            $result[$field] = trim($parsed[$field] ?? '');
+        foreach (array_keys($result) as $field) {
+            $value = $parsed[$field] ?? '';
+            // skills may come back as an array — join it
+            $result[$field] = is_array($value) ? implode(', ', $value) : trim($value);
         }
     }
 
