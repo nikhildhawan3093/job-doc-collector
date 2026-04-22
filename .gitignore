@@ -3,3 +3,4 @@ uploads/*
 config/db.php
 config/env.php
 .mcp.json
+vendor/

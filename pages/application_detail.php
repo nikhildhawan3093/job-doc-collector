@@ -30,12 +30,11 @@ $documents = pg_fetch_all($doc_result) ?: [];
 
 $uploaded_types = array_column($documents, 'document_type');
 
-$doc_types = ['resume', 'cover_letter', 'id_proof', 'aadhaar'];
+$doc_types = ['resume', 'cover_letter', 'id_proof'];
 $doc_labels = [
     'resume'       => 'Resume',
     'cover_letter' => 'Cover Letter',
     'id_proof'     => 'ID Proof',
-    'aadhaar'      => 'Aadhaar Card',
 ];
 
 $magic_link = 'http://localhost/php/job-doc-collector/pages/upload.php?token=' . urlencode($application['token']);
@@ -52,6 +51,17 @@ if ($aadhaar_doc) {
         [$aadhaar_doc['id']]
     ));
 }
+
+// Fetch existing PDF report
+$pdf_report = null;
+if ($aadhaar_doc) {
+    $pdf_report = pg_fetch_assoc(pg_query_params($conn,
+        "SELECT * FROM pdf_reports WHERE document_id = $1",
+        [$aadhaar_doc['id']]
+    ));
+}
+
+$report_generated = isset($_GET['report']) && $_GET['report'] === 'generated';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -300,40 +310,28 @@ if ($aadhaar_doc) {
         <?php endforeach; ?>
     </div>
 
-    <!-- Aadhaar Extracted Data -->
-    <?php if ($aadhaar_doc): ?>
+    <!-- PDF Report -->
+    <?php if ($aadhaar_doc && $aadhaar_doc['processed_status'] === 'done'): ?>
     <div class="card">
-        <h2>Aadhaar Extracted Data</h2>
+        <h2>PDF Report</h2>
 
-        <?php if ($aadhaar_doc['processed_status'] === 'done' && $aadhaar_data): ?>
-            <div class="info-grid">
-                <div class="info-item">
-                    <label>Aadhaar Number</label>
-                    <span><?= htmlspecialchars($aadhaar_data['aadhaar_number'] ?: '—') ?></span>
-                </div>
-                <div class="info-item">
-                    <label>Name</label>
-                    <span><?= htmlspecialchars($aadhaar_data['name'] ?: '—') ?></span>
-                </div>
-                <div class="info-item">
-                    <label>Date of Birth</label>
-                    <span><?= htmlspecialchars($aadhaar_data['dob'] ?: '—') ?></span>
-                </div>
-                <div class="info-item">
-                    <label>Blur Status</label>
-                    <span><?= ucfirst($aadhaar_doc['blur_status']) ?></span>
-                </div>
-            </div>
-
-        <?php elseif ($aadhaar_doc['blur_status'] === 'blurry'): ?>
-            <p style="color:#c0392b;font-size:0.9rem;">⚠ Aadhaar image is blurry. Candidate needs to re-upload a clearer image.</p>
-
-        <?php elseif ($aadhaar_doc['processed_status'] === 'failed'): ?>
-            <p style="color:#e67e22;font-size:0.9rem;">⚠ Data extraction or validation failed. Possible reasons: invalid Aadhaar number, missing name, or unreadable date of birth. Please request a re-upload.</p>
-
-        <?php else: ?>
-            <p style="color:#888;font-size:0.9rem;">Processing pending...</p>
+        <?php if ($report_generated): ?>
+            <p style="color:#27ae60;font-size:0.9rem;margin-bottom:0.8rem;">✔ Report generated successfully.</p>
         <?php endif; ?>
+
+        <div style="display:flex;gap:0.8rem;align-items:center;flex-wrap:wrap;">
+            <a href="generate_report.php?id=<?= $id ?>"
+               style="padding:0.55rem 1.1rem;background:#4a90e2;color:#fff;border-radius:5px;text-decoration:none;font-size:0.9rem;">
+                ⬇ Generate &amp; Download PDF
+            </a>
+
+            <?php if ($pdf_report): ?>
+                <a href="../<?= htmlspecialchars($pdf_report['pdf_path']) ?>" download
+                   style="padding:0.55rem 1.1rem;background:#fff;color:#4a90e2;border:1px solid #4a90e2;border-radius:5px;text-decoration:none;font-size:0.9rem;">
+                    Last Report (<?= date('d M Y', strtotime($pdf_report['generated_at'])) ?>)
+                </a>
+            <?php endif; ?>
+        </div>
     </div>
     <?php endif; ?>
 

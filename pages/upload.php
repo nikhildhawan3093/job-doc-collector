@@ -28,12 +28,14 @@ while ($row = pg_fetch_assoc($doc_result)) {
     $uploaded_types[] = $row['document_type'];
 }
 
-$doc_types = ['resume', 'cover_letter', 'id_proof'];
+$doc_types = ['resume', 'cover_letter', 'id_proof', 'aadhaar'];
 $doc_labels = [
     'resume'       => 'Resume',
     'cover_letter' => 'Cover Letter',
     'id_proof'     => 'ID Proof',
+    'aadhaar'      => 'Aadhaar Card',
 ];
+$mandatory_types = ['aadhaar'];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -174,10 +176,16 @@ $doc_labels = [
     </div>
 
     <?php foreach ($doc_types as $type): ?>
+        <?php $is_mandatory = in_array($type, $mandatory_types); ?>
         <div class="doc-card">
             <div class="doc-info">
-                <h3><?= $doc_labels[$type] ?></h3>
-                <p>PDF, DOC, or image file</p>
+                <h3>
+                    <?= $doc_labels[$type] ?>
+                    <?php if ($is_mandatory): ?>
+                        <span style="background:#fff3e0;color:#e67e22;font-size:0.72rem;padding:0.15rem 0.5rem;border-radius:20px;margin-left:0.4rem;font-weight:bold;">Required</span>
+                    <?php endif; ?>
+                </h3>
+                <p><?= $type === 'aadhaar' ? 'JPG, PNG, or PDF — must be clear (not blurry)' : 'PDF, JPG, or PNG' ?></p>
             </div>
 
             <?php if (in_array($type, $uploaded_types)): ?>
@@ -224,21 +232,20 @@ async function handleUpload(e, type) {
 
         const response = text.trim();
 
-        // Validation failed — data extracted but invalid, prompt re-upload
         if (res.ok && response.startsWith('validation_failed:')) {
             const msg = response.replace('validation_failed:', '').trim();
             errDiv.textContent = '⚠ Data invalid — ' + msg + ' Please re-upload a clearer image.';
             btn.disabled  = false;
             btn.innerHTML = 'Re-upload';
 
-        // Blurry image — prompt re-upload
         } else if (res.ok && response === 'blurry') {
             const slot = document.getElementById('slot-' + type);
+            const token = document.querySelector('input[name="token"]').value;
             slot.innerHTML =
-                '<span class="badge-blurry">⚠ Blurry — please re-upload a clearer image</span>' +
+                '<span style="background:#fdecea;color:#c0392b;padding:0.3rem 0.7rem;border-radius:20px;font-size:0.82rem;">⚠ Blurry — please re-upload a clearer image</span>' +
                 '<div style="margin-top:0.5rem">' +
                 '<form class="upload-form" onsubmit="handleUpload(event,\'' + type + '\')" enctype="multipart/form-data">' +
-                '<input type="hidden" name="token" value="' + document.querySelector('[name=token]').value + '">' +
+                '<input type="hidden" name="token" value="' + token + '">' +
                 '<input type="hidden" name="document_type" value="' + type + '">' +
                 '<input type="hidden" name="ajax" value="1">' +
                 '<input type="file" name="file" required accept=".pdf,.jpg,.jpeg,.png">' +
@@ -246,7 +253,6 @@ async function handleUpload(e, type) {
                 '</form>' +
                 '<div class="error-msg" id="err-' + type + '"></div></div>';
 
-        // Success
         } else if (res.ok && response === 'ok') {
             const slot = document.getElementById('slot-' + type);
             slot.innerHTML = '<span class="badge-done">✔ Uploaded</span>';
