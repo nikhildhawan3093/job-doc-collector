@@ -30,14 +30,28 @@ $documents = pg_fetch_all($doc_result) ?: [];
 
 $uploaded_types = array_column($documents, 'document_type');
 
-$doc_types = ['resume', 'cover_letter', 'id_proof'];
+$doc_types = ['resume', 'cover_letter', 'id_proof', 'aadhaar'];
 $doc_labels = [
     'resume'       => 'Resume',
     'cover_letter' => 'Cover Letter',
     'id_proof'     => 'ID Proof',
+    'aadhaar'      => 'Aadhaar Card',
 ];
 
 $magic_link = 'http://localhost/php/job-doc-collector/pages/upload.php?token=' . urlencode($application['token']);
+
+// Fetch Aadhaar extracted data if available
+$aadhaar_doc = null;
+foreach ($documents as $d) {
+    if ($d['document_type'] === 'aadhaar') { $aadhaar_doc = $d; break; }
+}
+$aadhaar_data = null;
+if ($aadhaar_doc) {
+    $aadhaar_data = pg_fetch_assoc(pg_query_params($conn,
+        "SELECT * FROM aadhaar_data WHERE document_id = $1",
+        [$aadhaar_doc['id']]
+    ));
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -285,6 +299,43 @@ $magic_link = 'http://localhost/php/job-doc-collector/pages/upload.php?token=' .
             </div>
         <?php endforeach; ?>
     </div>
+
+    <!-- Aadhaar Extracted Data -->
+    <?php if ($aadhaar_doc): ?>
+    <div class="card">
+        <h2>Aadhaar Extracted Data</h2>
+
+        <?php if ($aadhaar_doc['processed_status'] === 'done' && $aadhaar_data): ?>
+            <div class="info-grid">
+                <div class="info-item">
+                    <label>Aadhaar Number</label>
+                    <span><?= htmlspecialchars($aadhaar_data['aadhaar_number'] ?: '—') ?></span>
+                </div>
+                <div class="info-item">
+                    <label>Name</label>
+                    <span><?= htmlspecialchars($aadhaar_data['name'] ?: '—') ?></span>
+                </div>
+                <div class="info-item">
+                    <label>Date of Birth</label>
+                    <span><?= htmlspecialchars($aadhaar_data['dob'] ?: '—') ?></span>
+                </div>
+                <div class="info-item">
+                    <label>Blur Status</label>
+                    <span><?= ucfirst($aadhaar_doc['blur_status']) ?></span>
+                </div>
+            </div>
+
+        <?php elseif ($aadhaar_doc['blur_status'] === 'blurry'): ?>
+            <p style="color:#c0392b;font-size:0.9rem;">⚠ Aadhaar image is blurry. Candidate needs to re-upload a clearer image.</p>
+
+        <?php elseif ($aadhaar_doc['processed_status'] === 'failed'): ?>
+            <p style="color:#e67e22;font-size:0.9rem;">⚠ OCR extraction failed. The image may be unclear or unreadable.</p>
+
+        <?php else: ?>
+            <p style="color:#888;font-size:0.9rem;">Processing pending...</p>
+        <?php endif; ?>
+    </div>
+    <?php endif; ?>
 
     <!-- Magic Link -->
     <div class="card">
