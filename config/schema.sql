@@ -36,6 +36,22 @@ CREATE TABLE aadhaar_data (
     extracted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Stores extracted Resume OCR data for a document
+CREATE TABLE resume_data (
+    id                SERIAL PRIMARY KEY,
+    document_id       INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+    name              VARCHAR(255),
+    email             VARCHAR(255),
+    phone             VARCHAR(50),
+    skills            TEXT,
+    education         TEXT,
+    latest_company    VARCHAR(255),
+    latest_role       VARCHAR(255),
+    latest_start_date VARCHAR(20),
+    latest_end_date   VARCHAR(20),
+    extracted_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Stores generated PDF report path for a document
 CREATE TABLE pdf_reports (
     id SERIAL PRIMARY KEY,
