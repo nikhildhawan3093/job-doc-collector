@@ -149,35 +149,51 @@ if ($document_type === 'resume') {
     $raw_text = extract_resume_text($file_path);
 
     if ($raw_text !== '') {
-        $parsed = parse_resume_data($raw_text);
+        $parsed     = parse_resume_data($raw_text);
+        $validation = validate_resume_data($parsed);
 
-        pg_query_params($conn,
-            "INSERT INTO resume_data
-                (document_id, name, email, phone, skills, education,
-                 latest_company, latest_role, latest_start_date, latest_end_date)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
-            [
-                $document_id,
-                $parsed['name'],
-                $parsed['email'],
-                $parsed['phone'],
-                $parsed['skills'],
-                $parsed['education'],
-                $parsed['latest_company'],
-                $parsed['latest_role'],
-                $parsed['latest_start_date'],
-                $parsed['latest_end_date'],
-            ]
-        );
-        pg_query_params($conn,
-            "UPDATE documents SET processed_status = 'done' WHERE id = $1",
-            [$document_id]
-        );
+        if ($validation['valid']) {
+            pg_query_params($conn,
+                "INSERT INTO resume_data
+                    (document_id, name, email, phone, skills, education,
+                     latest_company, latest_role, latest_start_date, latest_end_date)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+                [
+                    $document_id,
+                    $parsed['name'],
+                    $parsed['email'],
+                    $parsed['phone'],
+                    $parsed['skills'],
+                    $parsed['education'],
+                    $parsed['latest_company'],
+                    $parsed['latest_role'],
+                    $parsed['latest_start_date'],
+                    $parsed['latest_end_date'],
+                ]
+            );
+            pg_query_params($conn,
+                "UPDATE documents SET processed_status = 'done' WHERE id = $1",
+                [$document_id]
+            );
+        } else {
+            pg_query_params($conn,
+                "UPDATE documents SET processed_status = 'failed' WHERE id = $1",
+                [$document_id]
+            );
+            if (!empty($_POST['ajax'])) {
+                echo 'validation_failed:' . implode(' ', $validation['errors']);
+                exit;
+            }
+        }
     } else {
         pg_query_params($conn,
             "UPDATE documents SET processed_status = 'failed' WHERE id = $1",
             [$document_id]
         );
+        if (!empty($_POST['ajax'])) {
+            echo 'validation_failed:Could not extract text from the PDF. Please upload a valid resume.';
+            exit;
+        }
     }
 }
 

@@ -55,6 +55,57 @@ function validate_aadhaar_data(array $data): array
 }
 
 // ─────────────────────────────────────────────
+// RESUME DATA VALIDATION
+// ─────────────────────────────────────────────
+
+/**
+ * Validate extracted resume fields.
+ * Rules:
+ *   - name: must not be empty
+ *   - email: must be valid format
+ *   - phone: must contain only digits, spaces, +, -, ()
+ *   - latest_company + latest_role: at least one must be present (experience exists)
+ *
+ * @param array $data  Parsed resume fields
+ * @return array  ['valid' => bool, 'errors' => [field => message]]
+ */
+function validate_resume_data(array $data): array
+{
+    $errors = [];
+
+    // Name: must not be empty
+    if (trim($data['name'] ?? '') === '') {
+        $errors['name'] = 'Name must not be empty.';
+    }
+
+    // Email: must be valid format
+    $email = trim($data['email'] ?? '');
+    if ($email === '') {
+        $errors['email'] = 'Email must not be empty.';
+    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $errors['email'] = 'Email is not a valid format.';
+    }
+
+    // Phone: digits, spaces, +, -, () only — at least 7 digits
+    $phone  = trim($data['phone'] ?? '');
+    $digits = preg_replace('/\D/', '', $phone);
+    if ($phone === '') {
+        $errors['phone'] = 'Phone must not be empty.';
+    } elseif (!preg_match('/^[\d\s\+\-\(\)]+$/', $phone) || strlen($digits) < 7) {
+        $errors['phone'] = 'Phone must be a valid numeric number.';
+    }
+
+    // Experience: latest_company or latest_role must exist
+    $company = trim($data['latest_company'] ?? '');
+    $role    = trim($data['latest_role']    ?? '');
+    if ($company === '' && $role === '') {
+        $errors['experience'] = 'No work experience found in resume.';
+    }
+
+    return ['valid' => empty($errors), 'errors' => $errors];
+}
+
+// ─────────────────────────────────────────────
 // BLUR DETECTION
 // ─────────────────────────────────────────────
 
