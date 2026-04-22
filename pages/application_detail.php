@@ -38,6 +38,30 @@ $doc_labels = [
 ];
 
 $magic_link = 'http://localhost/php/job-doc-collector/pages/upload.php?token=' . urlencode($application['token']);
+
+// Fetch Aadhaar extracted data if available
+$aadhaar_doc = null;
+foreach ($documents as $d) {
+    if ($d['document_type'] === 'aadhaar') { $aadhaar_doc = $d; break; }
+}
+$aadhaar_data = null;
+if ($aadhaar_doc) {
+    $aadhaar_data = pg_fetch_assoc(pg_query_params($conn,
+        "SELECT * FROM aadhaar_data WHERE document_id = $1",
+        [$aadhaar_doc['id']]
+    ));
+}
+
+// Fetch existing PDF report
+$pdf_report = null;
+if ($aadhaar_doc) {
+    $pdf_report = pg_fetch_assoc(pg_query_params($conn,
+        "SELECT * FROM pdf_reports WHERE document_id = $1",
+        [$aadhaar_doc['id']]
+    ));
+}
+
+$report_generated = isset($_GET['report']) && $_GET['report'] === 'generated';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -285,6 +309,31 @@ $magic_link = 'http://localhost/php/job-doc-collector/pages/upload.php?token=' .
             </div>
         <?php endforeach; ?>
     </div>
+
+    <!-- PDF Report -->
+    <?php if ($aadhaar_doc && $aadhaar_doc['processed_status'] === 'done'): ?>
+    <div class="card">
+        <h2>PDF Report</h2>
+
+        <?php if ($report_generated): ?>
+            <p style="color:#27ae60;font-size:0.9rem;margin-bottom:0.8rem;">✔ Report generated successfully.</p>
+        <?php endif; ?>
+
+        <div style="display:flex;gap:0.8rem;align-items:center;flex-wrap:wrap;">
+            <a href="generate_report.php?id=<?= $id ?>"
+               style="padding:0.55rem 1.1rem;background:#4a90e2;color:#fff;border-radius:5px;text-decoration:none;font-size:0.9rem;">
+                ⬇ Generate &amp; Download PDF
+            </a>
+
+            <?php if ($pdf_report): ?>
+                <a href="../<?= htmlspecialchars($pdf_report['pdf_path']) ?>" download
+                   style="padding:0.55rem 1.1rem;background:#fff;color:#4a90e2;border:1px solid #4a90e2;border-radius:5px;text-decoration:none;font-size:0.9rem;">
+                    Last Report (<?= date('d M Y', strtotime($pdf_report['generated_at'])) ?>)
+                </a>
+            <?php endif; ?>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <!-- Magic Link -->
     <div class="card">

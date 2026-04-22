@@ -1,3 +1,6 @@
 uploads/*
 !uploads/.gitkeep
 config/db.php
+config/env.php
+.mcp.json
+vendor/
