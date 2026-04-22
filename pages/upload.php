@@ -35,7 +35,8 @@ $doc_labels = [
     'id_proof'     => 'ID Proof',
     'aadhaar'      => 'Aadhaar Card',
 ];
-$mandatory_types = ['aadhaar'];
+$mandatory_types  = ['aadhaar'];
+$pdf_only_types   = ['resume'];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -176,7 +177,10 @@ $mandatory_types = ['aadhaar'];
     </div>
 
     <?php foreach ($doc_types as $type): ?>
-        <?php $is_mandatory = in_array($type, $mandatory_types); ?>
+        <?php
+            $is_mandatory = in_array($type, $mandatory_types);
+            $is_pdf_only  = in_array($type, $pdf_only_types);
+        ?>
         <div class="doc-card">
             <div class="doc-info">
                 <h3>
@@ -185,7 +189,11 @@ $mandatory_types = ['aadhaar'];
                         <span style="background:#fff3e0;color:#e67e22;font-size:0.72rem;padding:0.15rem 0.5rem;border-radius:20px;margin-left:0.4rem;font-weight:bold;">Required</span>
                     <?php endif; ?>
                 </h3>
-                <p><?= $type === 'aadhaar' ? 'JPG, PNG, or PDF — must be clear (not blurry)' : 'PDF, JPG, or PNG' ?></p>
+                <?php
+                    if ($type === 'resume')  echo '<p>PDF only — max 5MB</p>';
+                    elseif ($type === 'aadhaar') echo '<p>PDF, JPG, or PNG — images must be clear (not blurry)</p>';
+                    else echo '<p>PDF, JPG, or PNG</p>';
+                ?>
             </div>
 
             <?php if (in_array($type, $uploaded_types)): ?>
@@ -196,7 +204,7 @@ $mandatory_types = ['aadhaar'];
                         <input type="hidden" name="token" value="<?= htmlspecialchars($token) ?>">
                         <input type="hidden" name="document_type" value="<?= $type ?>">
                         <input type="hidden" name="ajax" value="1">
-                        <input type="file" name="file" required accept=".pdf,.jpg,.jpeg,.png">
+                        <input type="file" name="file" required accept="<?= $is_pdf_only ? '.pdf' : '.pdf,.jpg,.jpeg,.png' ?>">
                         <button type="submit" id="btn-<?= $type ?>">Upload</button>
                     </form>
                     <div class="error-msg" id="err-<?= $type ?>"></div>

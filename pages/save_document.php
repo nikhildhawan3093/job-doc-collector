@@ -23,10 +23,20 @@ if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
     die("No file uploaded or upload error.");
 }
 
-$file        = $_FILES['file'];
-$max_size    = 5 * 1024 * 1024; // 5MB
-$allowed     = ['application/pdf', 'image/jpeg', 'image/png'];
-$allowed_ext = ['pdf', 'jpg', 'jpeg', 'png'];
+$file     = $_FILES['file'];
+$max_size = 5 * 1024 * 1024; // 5MB
+
+// Resume accepts PDF only; all others accept PDF + images
+if ($document_type === 'resume') {
+    $allowed     = ['application/pdf'];
+    $allowed_ext = ['pdf'];
+} elseif ($document_type === 'aadhaar') {
+    $allowed     = ['image/jpeg', 'image/png', 'application/pdf'];
+    $allowed_ext = ['jpg', 'jpeg', 'png', 'pdf'];
+} else {
+    $allowed     = ['application/pdf', 'image/jpeg', 'image/png'];
+    $allowed_ext = ['pdf', 'jpg', 'jpeg', 'png'];
+}
 
 // Validate size
 if ($file['size'] > $max_size) {
@@ -39,13 +49,17 @@ $mime_type = finfo_file($finfo, $file['tmp_name']);
 finfo_close($finfo);
 
 if (!in_array($mime_type, $allowed)) {
-    die("Invalid file type. Allowed: PDF, JPG, PNG.");
+    die($document_type === 'resume'
+        ? "Resume must be a PDF file."
+        : "Invalid file type. Allowed: PDF, JPG, PNG.");
 }
 
 // Validate extension
 $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
 if (!in_array($ext, $allowed_ext)) {
-    die("Invalid file extension. Allowed: pdf, jpg, jpeg, png.");
+    die($document_type === 'resume'
+        ? "Resume must be a PDF file."
+        : "Invalid file extension. Allowed: pdf, jpg, jpeg, png.");
 }
 
 // Save file to uploads/
@@ -96,8 +110,8 @@ if ($existing) {
     $document_id = pg_fetch_result(pg_query($conn, "SELECT lastval()"), 0, 0);
 }
 
-// If Aadhaar is clear — run OCR extraction via OpenAI then validate
-if ($document_type === 'aadhaar' && $blur_status === 'clear') {
+// Run OCR if Aadhaar is clear image or a PDF (blur skipped for PDFs)
+if ($document_type === 'aadhaar' && ($blur_status === 'clear' || $blur_status === 'skipped')) {
     $extracted   = extract_aadhaar_data($file_path);
     $validation  = validate_aadhaar_data($extracted);
 
@@ -130,6 +144,7 @@ if ($document_type === 'aadhaar' && $blur_status === 'clear') {
 // Return response
 if (!empty($_POST['ajax'])) {
     echo ($document_type === 'aadhaar' && $blur_status === 'blurry') ? 'blurry' : 'ok';
+
 } else {
     header('Location: upload.php?token=' . urlencode($token));
 }
