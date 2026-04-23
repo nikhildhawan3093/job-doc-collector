@@ -8,708 +8,593 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 $id = (int)($_GET['id'] ?? 0);
-if (!$id) {
-    die("Invalid application ID.");
-}
+if (!$id) die("Invalid application ID.");
 
-// Fetch application
-$result      = pg_query_params($conn, "
-    SELECT * FROM applications WHERE id = $1 AND created_by = $2
-", [$id, $_SESSION['user_id']]);
+$result      = pg_query_params($conn, "SELECT * FROM applications WHERE id = \$1 AND created_by = \$2",
+    [$id, $_SESSION['user_id']]);
 $application = pg_fetch_assoc($result);
+if (!$application) die("Application not found.");
 
-if (!$application) {
-    die("Application not found.");
-}
-
-// Fetch documents
-$doc_result = pg_query_params($conn, "
-    SELECT * FROM documents WHERE application_id = $1 ORDER BY uploaded_at ASC
-", [$id]);
-$documents = pg_fetch_all($doc_result) ?: [];
-
+$doc_result = pg_query_params($conn, "SELECT * FROM documents WHERE application_id = \$1 ORDER BY uploaded_at ASC", [$id]);
+$documents  = pg_fetch_all($doc_result) ?: [];
 $uploaded_types = array_column($documents, 'document_type');
 
-$doc_types = ['resume', 'cover_letter', 'id_proof'];
-$doc_labels = [
-    'resume'       => 'Resume',
-    'cover_letter' => 'Cover Letter',
-    'id_proof'     => 'ID Proof',
-];
+$doc_types  = ['resume', 'cover_letter', 'id_proof'];
+$doc_labels = ['resume' => 'Resume', 'cover_letter' => 'Cover Letter', 'id_proof' => 'ID Proof'];
 
 $magic_link = 'http://localhost/php/job-doc-collector/pages/upload.php?token=' . urlencode($application['token']);
 
-// Fetch Aadhaar extracted data if available
 $aadhaar_doc = null;
-foreach ($documents as $d) {
-    if ($d['document_type'] === 'aadhaar') { $aadhaar_doc = $d; break; }
-}
-$aadhaar_data = null;
-if ($aadhaar_doc) {
-    $aadhaar_data = pg_fetch_assoc(pg_query_params($conn,
-        "SELECT * FROM aadhaar_data WHERE document_id = $1",
-        [$aadhaar_doc['id']]
-    ));
-}
+foreach ($documents as $d) { if ($d['document_type'] === 'aadhaar') { $aadhaar_doc = $d; break; } }
+$aadhaar_data = $aadhaar_doc
+    ? pg_fetch_assoc(pg_query_params($conn, "SELECT * FROM aadhaar_data WHERE document_id = \$1", [$aadhaar_doc['id']]))
+    : null;
 
-// Fetch resume extracted data if available
 $resume_doc = null;
-foreach ($documents as $d) {
-    if ($d['document_type'] === 'resume') { $resume_doc = $d; break; }
-}
-$resume_data = null;
-if ($resume_doc) {
-    $resume_data = pg_fetch_assoc(pg_query_params($conn,
-        "SELECT * FROM resume_data WHERE document_id = $1",
-        [$resume_doc['id']]
-    ));
-}
+foreach ($documents as $d) { if ($d['document_type'] === 'resume') { $resume_doc = $d; break; } }
+$resume_data = $resume_doc
+    ? pg_fetch_assoc(pg_query_params($conn, "SELECT * FROM resume_data WHERE document_id = \$1", [$resume_doc['id']]))
+    : null;
 
-// Fetch existing PDF report
-$pdf_report = null;
-if ($aadhaar_doc) {
-    $pdf_report = pg_fetch_assoc(pg_query_params($conn,
-        "SELECT * FROM pdf_reports WHERE document_id = $1",
-        [$aadhaar_doc['id']]
-    ));
-}
+$pdf_report = $aadhaar_doc
+    ? pg_fetch_assoc(pg_query_params($conn, "SELECT * FROM pdf_reports WHERE document_id = \$1", [$aadhaar_doc['id']]))
+    : null;
 
 $report_generated = isset($_GET['report']) && $_GET['report'] === 'generated';
+
+$user_email   = $_SESSION['user_email'] ?? '';
+$user_initial = strtoupper(substr($user_email, 0, 1));
+
+$all_doc_types = ['resume', 'cover_letter', 'id_proof', 'aadhaar'];
+$uploaded_count = count($uploaded_types);
+$pct = round(($uploaded_count / 4) * 100);
+
+$initials = strtoupper(substr($application['candidate_name'], 0, 1));
+$nameParts = explode(' ', $application['candidate_name']);
+if (count($nameParts) > 1) $initials = strtoupper($nameParts[0][0] . end($nameParts)[0]);
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Application Detail – Job Doc Collector</title>
+    <title><?= htmlspecialchars($application['candidate_name']) ?> – Job Doc Collector</title>
+    <link rel="stylesheet" href="../assets/css/app.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-
-        body {
-            font-family: Arial, sans-serif;
-            background: #f0f2f5;
-            min-height: 100vh;
-        }
-
-        header {
-            background: #4a90e2;
-            color: #fff;
-            padding: 1rem 2rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        header h1 { font-size: 1.2rem; }
-
-        header a {
-            color: #fff;
-            text-decoration: none;
-            font-size: 0.9rem;
-            background: rgba(255,255,255,0.2);
-            padding: 0.4rem 0.8rem;
-            border-radius: 4px;
-        }
-
-        header a:hover { background: rgba(255,255,255,0.35); }
-
-        .container {
-            max-width: 700px;
-            margin: 2rem auto;
-            padding: 0 1rem;
-        }
-
-        .card {
-            background: #fff;
-            border-radius: 8px;
-            padding: 1.5rem;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            margin-bottom: 1.5rem;
-        }
-
-        .card h2 {
-            font-size: 1.1rem;
-            color: #333;
-            margin-bottom: 1rem;
-            padding-bottom: 0.5rem;
-            border-bottom: 1px solid #eee;
-        }
-
-        .info-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 0.8rem 1.5rem;
-        }
-
-        .info-item label {
-            font-size: 0.8rem;
-            color: #888;
-            display: block;
-            margin-bottom: 0.2rem;
-        }
-
-        .info-item span {
-            font-size: 0.95rem;
-            color: #333;
-        }
-
         .doc-row {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 0.8rem 0;
-            border-bottom: 1px solid #f0f0f0;
+            padding: .85rem 0;
+            border-bottom: 1px solid var(--border);
+            gap: 1rem;
         }
-
         .doc-row:last-child { border-bottom: none; }
-
-        .doc-name { font-size: 0.95rem; color: #333; }
-
-        .badge-uploaded {
-            background: #e6f9ef;
-            color: #27ae60;
-            padding: 0.25rem 0.7rem;
-            border-radius: 20px;
-            font-size: 0.82rem;
+        .doc-row-left { display: flex; align-items: center; gap: .75rem; }
+        .doc-type-icon {
+            width: 36px; height: 36px;
+            border-radius: 9px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: .9rem;
+            flex-shrink: 0;
         }
-
-        .badge-missing {
-            background: #fdecea;
-            color: #c0392b;
-            padding: 0.25rem 0.7rem;
-            border-radius: 20px;
-            font-size: 0.82rem;
-        }
-
-        .doc-actions { display: flex; gap: 0.5rem; align-items: center; }
-
-        .btn-view {
-            font-size: 0.82rem;
-            color: #4a90e2;
-            text-decoration: none;
-            padding: 0.25rem 0.6rem;
-            border: 1px solid #4a90e2;
-            border-radius: 4px;
-        }
-
-        .btn-view:hover { background: #eef3fb; }
-
-        .link-box {
-            display: flex;
-            align-items: center;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-            overflow: hidden;
-            margin-top: 0.8rem;
-        }
-
-        .link-box input {
-            flex: 1;
-            padding: 0.55rem 0.8rem;
-            border: none;
-            font-size: 0.85rem;
-            background: #f7f9fc;
-            outline: none;
-            color: #333;
-        }
-
-        .link-box button {
-            padding: 0.55rem 1rem;
-            background: #4a90e2;
+        .hero-card {
+            background: linear-gradient(135deg, #4338CA 0%, #6366F1 100%);
+            border-radius: var(--r-lg);
+            padding: 1.75rem;
             color: #fff;
-            border: none;
-            cursor: pointer;
-            font-size: 0.85rem;
-        }
-
-        .link-box button:hover { background: #357abd; }
-
-        .copied {
-            font-size: 0.82rem;
-            color: #27ae60;
-            margin-top: 0.4rem;
-            display: none;
-        }
-
-        .progress-summary {
-            font-size: 0.9rem;
-            color: #555;
-            margin-bottom: 0.8rem;
-        }
-
-        .progress-bar {
-            background: #e0e0e0;
-            border-radius: 20px;
-            height: 8px;
+            margin-bottom: 1.5rem;
+            position: relative;
             overflow: hidden;
-            margin-bottom: 1rem;
         }
-
-        .progress-fill {
-            height: 100%;
-            background: #4a90e2;
-            border-radius: 20px;
-            transition: width 0.3s;
+        .hero-card::before {
+            content: '';
+            position: absolute;
+            width: 200px; height: 200px;
+            border-radius: 50%;
+            background: rgba(255,255,255,.07);
+            top: -60px; right: -60px;
         }
-
-        .progress-fill.complete { background: #27ae60; }
-
-        .aadhaar-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 0.8rem 1.5rem;
+        .hero-card::after {
+            content: '';
+            position: absolute;
+            width: 120px; height: 120px;
+            border-radius: 50%;
+            background: rgba(255,255,255,.05);
+            bottom: -30px; right: 80px;
         }
-
-        .aadhaar-grid .info-item.full { grid-column: 1 / -1; }
-
-        .field-view { font-size: 0.95rem; color: #333; }
-
-        .field-edit {
-            display: none;
-            width: 100%;
-            padding: 0.35rem 0.5rem;
-            border: 1px solid #4a90e2;
-            border-radius: 4px;
-            font-size: 0.9rem;
-            outline: none;
+        .hero-avatar {
+            width: 60px; height: 60px;
+            border-radius: 14px;
+            background: rgba(255,255,255,.2);
+            border: 2px solid rgba(255,255,255,.3);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.4rem; font-weight: 800; color: #fff;
+            flex-shrink: 0;
         }
-
-        .edit-actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
-
-        .btn-edit {
-            padding: 0.4rem 0.9rem;
-            background: #fff;
-            color: #4a90e2;
-            border: 1px solid #4a90e2;
-            border-radius: 5px;
-            font-size: 0.85rem;
-            cursor: pointer;
-        }
-
-        .btn-save {
-            display: none;
-            padding: 0.4rem 0.9rem;
-            background: #4a90e2;
-            color: #fff;
-            border: none;
-            border-radius: 5px;
-            font-size: 0.85rem;
-            cursor: pointer;
-        }
-
-        .btn-cancel {
-            display: none;
-            padding: 0.4rem 0.9rem;
-            background: #fff;
-            color: #888;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-            font-size: 0.85rem;
-            cursor: pointer;
-        }
-
-        .save-msg {
-            font-size: 0.82rem;
-            margin-top: 0.5rem;
-            display: none;
-        }
-
-        .save-msg.success { color: #27ae60; }
-        .save-msg.error   { color: #c0392b; }
-
-        .badge-pending  { background: #fff8e1; color: #f39c12; padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.8rem; }
-        .badge-failed   { background: #fdecea; color: #c0392b; padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.8rem; }
-        .badge-done     { background: #e6f9ef; color: #27ae60; padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.8rem; }
-        .badge-skipped  { background: #f0f0f0; color: #888;    padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.8rem; }
+        .hero-name { font-size: 1.3rem; font-weight: 800; letter-spacing: -.02em; }
+        .hero-meta { font-size: .83rem; opacity: .8; margin-top: .25rem; display: flex; gap: .75rem; flex-wrap: wrap; }
+        .hero-meta span { display: flex; align-items: center; gap: .3rem; }
+        .hero-progress-wrap { margin-top: 1.25rem; }
+        .hero-progress-label { font-size: .78rem; opacity: .75; margin-bottom: .4rem; display: flex; justify-content: space-between; }
+        .hero-progress { height: 7px; background: rgba(255,255,255,.2); border-radius: 99px; overflow: hidden; }
+        .hero-progress-bar { height: 100%; background: rgba(255,255,255,.9); border-radius: 99px; transition: width .5s ease; }
     </style>
 </head>
 <body>
 
-<header>
-    <h1>Job Doc Collector</h1>
-    <a href="dashboard.php">← Dashboard</a>
+<header class="app-header">
+    <div class="header-inner">
+        <a class="brand" href="dashboard.php">
+            <div class="brand-icon"><i class="fa-solid fa-file-shield"></i></div>
+            <div>
+                <span class="brand-text">Job Doc Collector</span>
+                <span class="brand-sub">Hiring Manager Portal</span>
+            </div>
+        </a>
+        <div class="header-right">
+            <div class="header-user">
+                <div class="avatar"><?= $user_initial ?></div>
+            </div>
+            <a href="dashboard.php" class="btn-nav"><i class="fa-solid fa-arrow-left"></i> Dashboard</a>
+        </div>
+    </div>
 </header>
 
-<div class="container">
+<div class="page-md">
 
-    <!-- Candidate Info -->
-    <div class="card">
-        <h2>Candidate Info</h2>
-        <div class="info-grid">
-            <div class="info-item">
-                <label>Name</label>
-                <span><?= htmlspecialchars($application['candidate_name']) ?></span>
+    <!-- Breadcrumb -->
+    <div style="display:flex;align-items:center;gap:.5rem;font-size:.82rem;color:var(--text-2);margin-bottom:1.5rem;">
+        <a href="dashboard.php" style="color:var(--text-2);text-decoration:none;">Dashboard</a>
+        <i class="fa-solid fa-chevron-right" style="font-size:.65rem;color:var(--text-3);"></i>
+        <span style="color:var(--text);"><?= htmlspecialchars($application['candidate_name']) ?></span>
+    </div>
+
+    <?php if ($report_generated): ?>
+    <div class="alert alert-success fade-up" style="margin-bottom:1.25rem;">
+        <i class="fa-solid fa-circle-check" style="flex-shrink:0;"></i>
+        PDF report generated successfully.
+    </div>
+    <?php endif; ?>
+
+    <!-- Hero Card -->
+    <div class="hero-card fade-up">
+        <div style="display:flex;align-items:flex-start;gap:1.1rem;position:relative;z-index:1;">
+            <div class="hero-avatar"><?= $initials ?></div>
+            <div style="flex:1;min-width:0;">
+                <div class="hero-name"><?= htmlspecialchars($application['candidate_name']) ?></div>
+                <div class="hero-meta">
+                    <span><i class="fa-regular fa-envelope"></i><?= htmlspecialchars($application['candidate_email']) ?></span>
+                    <span><i class="fa-solid fa-briefcase"></i><?= htmlspecialchars($application['role']) ?></span>
+                    <span><i class="fa-regular fa-calendar"></i><?= date('d M Y', strtotime($application['created_at'])) ?></span>
+                </div>
             </div>
-            <div class="info-item">
-                <label>Email</label>
-                <span><?= htmlspecialchars($application['candidate_email']) ?></span>
+            <?php if ($aadhaar_doc && $aadhaar_doc['processed_status'] === 'done'): ?>
+            <a href="generate_report.php?id=<?= $id ?>"
+               style="background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);
+                      color:#fff;padding:.45rem 1rem;border-radius:var(--r-sm);
+                      font-size:.82rem;font-weight:600;text-decoration:none;
+                      display:flex;align-items:center;gap:.4rem;white-space:nowrap;
+                      transition:all .2s;backdrop-filter:blur(4px);flex-shrink:0;"
+               onmouseover="this.style.background='rgba(255,255,255,.3)'"
+               onmouseout="this.style.background='rgba(255,255,255,.2)'">
+                <i class="fa-solid fa-file-pdf"></i> Generate PDF
+            </a>
+            <?php endif; ?>
+        </div>
+        <div class="hero-progress-wrap" style="position:relative;z-index:1;">
+            <div class="hero-progress-label">
+                <span>Document Submission Progress</span>
+                <span><?= $uploaded_count ?>/4 uploaded</span>
             </div>
-            <div class="info-item">
-                <label>Role</label>
-                <span><?= htmlspecialchars($application['role']) ?></span>
-            </div>
-            <div class="info-item">
-                <label>Created</label>
-                <span><?= date('d M Y', strtotime($application['created_at'])) ?></span>
+            <div class="hero-progress">
+                <div class="hero-progress-bar" style="width:<?= $pct ?>%"></div>
             </div>
         </div>
     </div>
 
-    <!-- Documents -->
-    <div class="card">
-        <h2>Documents</h2>
-
-        <?php
-            $uploaded_count = count($uploaded_types);
-            $total = count($doc_types);
-            $pct   = ($uploaded_count / $total) * 100;
-        ?>
-        <p class="progress-summary"><?= $uploaded_count ?>/<?= $total ?> documents uploaded</p>
-        <div class="progress-bar">
-            <div class="progress-fill <?= $uploaded_count === $total ? 'complete' : '' ?>"
-                 style="width: <?= $pct ?>%"></div>
+    <!-- Document Status -->
+    <div class="card fade-up" style="animation-delay:.05s;">
+        <div class="card-head">
+            <div class="card-title">
+                <div class="card-icon"><i class="fa-solid fa-paperclip"></i></div>
+                Uploaded Documents
+            </div>
+            <?php if ($uploaded_count < 4): ?>
+            <span class="badge badge-warning"><i class="fa-solid fa-clock"></i> <?= 4 - $uploaded_count ?> pending</span>
+            <?php else: ?>
+            <span class="badge badge-success"><i class="fa-solid fa-circle-check"></i> All uploaded</span>
+            <?php endif; ?>
         </div>
-
-        <?php foreach ($doc_types as $type): ?>
+        <div class="card-body">
             <?php
+            $all_labels = ['resume' => ['Resume','fa-file-lines','si-primary'], 'cover_letter' => ['Cover Letter','fa-envelope-open-text','si-neutral'], 'id_proof' => ['ID Proof','fa-id-card','si-warning'], 'aadhaar' => ['Aadhaar Card','fa-fingerprint','si-success']];
+            foreach ($all_labels as $type => [$label, $icon, $ic_cls]):
                 $doc = null;
-                foreach ($documents as $d) {
-                    if ($d['document_type'] === $type) { $doc = $d; break; }
-                }
+                foreach ($documents as $d) { if ($d['document_type'] === $type) { $doc = $d; break; } }
             ?>
             <div class="doc-row">
-                <span class="doc-name"><?= $doc_labels[$type] ?></span>
-                <div class="doc-actions">
+                <div class="doc-row-left">
+                    <div class="doc-type-icon <?= $ic_cls ?>" style="background:var(--<?= str_replace(['si-primary','si-success','si-warning','si-neutral'],['primary-light','success-light','warning-light','bg'], $ic_cls) ?>);
+                         color:var(--<?= str_replace(['si-primary','si-success','si-warning','si-neutral'],['primary','success','warning','text-2'], $ic_cls) ?>);">
+                        <i class="fa-solid <?= $icon ?>"></i>
+                    </div>
+                    <div>
+                        <div style="font-size:.9rem;font-weight:600;color:var(--text);"><?= $label ?></div>
+                        <?php if ($doc): ?>
+                        <div style="font-size:.75rem;color:var(--text-3);">
+                            Uploaded <?= date('d M Y, H:i', strtotime($doc['uploaded_at'])) ?>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:.5rem;">
                     <?php if ($doc): ?>
-                        <a class="btn-view" href="../<?= htmlspecialchars($doc['file_url']) ?>" download>Download</a>
-                        <span class="badge-uploaded">✔ Uploaded</span>
+                        <span class="badge badge-success"><i class="fa-solid fa-check"></i> Uploaded</span>
+                        <a class="btn btn-ghost btn-sm" href="../<?= htmlspecialchars($doc['file_url']) ?>" download>
+                            <i class="fa-solid fa-download"></i> Download
+                        </a>
                     <?php else: ?>
-                        <span class="badge-missing">✗ Missing</span>
+                        <span class="badge badge-neutral"><i class="fa-solid fa-xmark"></i> Missing</span>
                     <?php endif; ?>
                 </div>
             </div>
-        <?php endforeach; ?>
+            <?php endforeach; ?>
+        </div>
     </div>
 
     <!-- Resume Extracted Data -->
     <?php if ($resume_doc): ?>
-    <div class="card">
-        <h2>Resume Extracted Data
+    <div class="card fade-up" style="animation-delay:.1s;">
+        <div class="card-head">
+            <div class="card-title">
+                <div class="card-icon" style="background:#EFF6FF;color:#2563EB;"><i class="fa-solid fa-file-lines"></i></div>
+                Resume Extracted Data
+            </div>
             <?php
                 $rs = $resume_doc['processed_status'];
-                if ($rs === 'done')       echo '<span class="badge-done" style="margin-left:0.5rem;">✔ Verified</span>';
-                elseif ($rs === 'failed') echo '<span class="badge-failed" style="margin-left:0.5rem;">✗ Failed</span>';
-                else                     echo '<span class="badge-pending" style="margin-left:0.5rem;">Pending</span>';
+                if ($rs === 'done')       echo '<span class="badge badge-success"><i class="fa-solid fa-circle-check"></i> Verified</span>';
+                elseif ($rs === 'failed') echo '<span class="badge badge-danger"><i class="fa-solid fa-xmark"></i> Failed</span>';
+                else                     echo '<span class="badge badge-neutral"><i class="fa-solid fa-clock"></i> Pending</span>';
             ?>
-        </h2>
-
+        </div>
+        <div class="card-body">
         <?php if ($resume_data): ?>
-        <div class="info-grid">
-            <div class="info-item">
-                <label>Name</label>
-                <span><?= htmlspecialchars($resume_data['name']) ?></span>
+            <!-- Personal Info -->
+            <div class="section-label">Personal Information</div>
+            <div class="info-grid" style="margin-bottom:1.25rem;">
+                <div><span class="info-label">Full Name</span><span class="info-val"><?= htmlspecialchars($resume_data['name']) ?></span></div>
+                <div><span class="info-label">Email</span><span class="info-val"><?= htmlspecialchars($resume_data['email']) ?></span></div>
+                <div><span class="info-label">Phone</span><span class="info-val"><?= htmlspecialchars($resume_data['phone']) ?></span></div>
+                <?php if ($resume_data['address']): ?>
+                <div class="full"><span class="info-label">Address</span><span class="info-val"><?= htmlspecialchars($resume_data['address']) ?></span></div>
+                <?php endif; ?>
+                <?php if ($resume_data['linkedin']): ?>
+                <div><span class="info-label">LinkedIn</span>
+                    <span class="info-val" style="color:var(--primary);"><?= htmlspecialchars($resume_data['linkedin']) ?></span>
+                </div>
+                <?php endif; ?>
+                <?php if ($resume_data['github']): ?>
+                <div><span class="info-label">GitHub</span>
+                    <span class="info-val" style="color:var(--primary);"><?= htmlspecialchars($resume_data['github']) ?></span>
+                </div>
+                <?php endif; ?>
             </div>
-            <div class="info-item">
-                <label>Email</label>
-                <span><?= htmlspecialchars($resume_data['email']) ?></span>
-            </div>
-            <div class="info-item">
-                <label>Phone</label>
-                <span><?= htmlspecialchars($resume_data['phone']) ?></span>
-            </div>
-            <div class="info-item">
-                <label>Education</label>
-                <span><?= htmlspecialchars($resume_data['education']) ?></span>
-            </div>
-            <div class="info-item" style="grid-column:1/-1;">
-                <label>Skills</label>
-                <span><?= htmlspecialchars($resume_data['skills']) ?></span>
-            </div>
-            <?php if ($resume_data['address']): ?>
-            <div class="info-item" style="grid-column:1/-1;">
-                <label>Address</label>
-                <span><?= htmlspecialchars($resume_data['address']) ?></span>
-            </div>
-            <?php endif; ?>
-            <?php if ($resume_data['linkedin']): ?>
-            <div class="info-item">
-                <label>LinkedIn</label>
-                <span><?= htmlspecialchars($resume_data['linkedin']) ?></span>
-            </div>
-            <?php endif; ?>
-            <?php if ($resume_data['github']): ?>
-            <div class="info-item">
-                <label>GitHub</label>
-                <span><?= htmlspecialchars($resume_data['github']) ?></span>
-            </div>
-            <?php endif; ?>
-        </div>
 
-        <?php if ($resume_data['latest_company'] || $resume_data['latest_role']): ?>
-        <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid #eee;">
-            <p style="font-size:0.8rem;color:#888;margin-bottom:0.6rem;text-transform:uppercase;letter-spacing:0.04em;">Latest Experience</p>
-            <div class="info-grid">
-                <div class="info-item">
-                    <label>Company</label>
-                    <span><?= htmlspecialchars($resume_data['latest_company']) ?></span>
-                </div>
-                <div class="info-item">
-                    <label>Role</label>
-                    <span><?= htmlspecialchars($resume_data['latest_role']) ?></span>
-                </div>
-                <div class="info-item">
-                    <label>Start Date</label>
-                    <span><?= htmlspecialchars($resume_data['latest_start_date']) ?></span>
-                </div>
-                <div class="info-item">
-                    <label>End Date</label>
-                    <span><?= htmlspecialchars($resume_data['latest_end_date']) ?></span>
+            <?php if ($resume_data['education']): ?>
+            <div class="section-label">Education</div>
+            <div style="font-size:.875rem;color:var(--text);margin-bottom:1.25rem;">
+                <?= htmlspecialchars($resume_data['education']) ?>
+            </div>
+            <?php endif; ?>
+
+            <?php if ($resume_data['skills']): ?>
+            <div class="section-label">Skills</div>
+            <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:1.25rem;">
+                <?php foreach (explode(',', $resume_data['skills']) as $skill): ?>
+                    <?php $s = trim($skill); if ($s): ?>
+                    <span style="background:var(--primary-light);color:var(--primary);
+                                 padding:.2rem .65rem;border-radius:var(--r-full);
+                                 font-size:.75rem;font-weight:600;"><?= htmlspecialchars($s) ?></span>
+                    <?php endif; ?>
+                <?php endforeach; ?>
+            </div>
+            <?php endif; ?>
+
+            <?php if ($resume_data['latest_company'] || $resume_data['latest_role']): ?>
+            <div class="section-label">Latest Experience</div>
+            <div style="background:var(--bg);border-radius:var(--r-sm);padding:1rem;border:1px solid var(--border);">
+                <div class="info-grid">
+                    <div><span class="info-label">Company</span><span class="info-val"><?= htmlspecialchars($resume_data['latest_company']) ?></span></div>
+                    <div><span class="info-label">Role</span><span class="info-val"><?= htmlspecialchars($resume_data['latest_role']) ?></span></div>
+                    <div><span class="info-label">Start Date</span><span class="info-val"><?= htmlspecialchars($resume_data['latest_start_date']) ?></span></div>
+                    <div><span class="info-label">End Date</span><span class="info-val"><?= htmlspecialchars($resume_data['latest_end_date'] ?: 'Present') ?></span></div>
                 </div>
             </div>
-        </div>
-        <?php endif; ?>
+            <?php endif; ?>
 
         <?php else: ?>
-        <p style="font-size:0.9rem;color:#888;">
-            <?= $rs === 'failed' ? 'Extraction failed or validation errors. You can enter data manually below.' : 'Data not yet extracted.' ?>
-        </p>
-        <!-- Manual entry form -->
-        <form style="margin-top:1rem;" onsubmit="saveResumeManual(event, <?= $resume_doc['id'] ?>)">
-            <div class="info-grid" style="margin-bottom:1rem;">
-                <div class="info-item"><label>Name</label><input class="field-edit" style="display:block;" id="rm-name" placeholder="Full Name" required></div>
-                <div class="info-item"><label>Email</label><input class="field-edit" style="display:block;" id="rm-email" placeholder="email@example.com" required></div>
-                <div class="info-item"><label>Phone</label><input class="field-edit" style="display:block;" id="rm-phone" placeholder="+91 XXXXX XXXXX" required></div>
-                <div class="info-item"><label>Education</label><input class="field-edit" style="display:block;" id="rm-education" placeholder="Degree, Institution, Year"></div>
-                <div class="info-item" style="grid-column:1/-1;"><label>Skills</label><input class="field-edit" style="display:block;" id="rm-skills" placeholder="PHP, JavaScript, ..."></div>
-                <div class="info-item"><label>Latest Company</label><input class="field-edit" style="display:block;" id="rm-latest_company" placeholder="Company Name" required></div>
-                <div class="info-item"><label>Latest Role</label><input class="field-edit" style="display:block;" id="rm-latest_role" placeholder="Job Title" required></div>
-                <div class="info-item"><label>Start Date</label><input class="field-edit" style="display:block;" id="rm-latest_start_date" placeholder="Jan 2022"></div>
-                <div class="info-item"><label>End Date</label><input class="field-edit" style="display:block;" id="rm-latest_end_date" placeholder="Dec 2024 or Present"></div>
-                <div class="info-item" style="grid-column:1/-1;"><label>Address</label><input class="field-edit" style="display:block;" id="rm-address" placeholder="City, State, Country"></div>
-                <div class="info-item"><label>LinkedIn</label><input class="field-edit" style="display:block;" id="rm-linkedin" placeholder="linkedin.com/in/username"></div>
-                <div class="info-item"><label>GitHub</label><input class="field-edit" style="display:block;" id="rm-github" placeholder="github.com/username"></div>
+            <div class="alert alert-warning" style="margin-bottom:1.25rem;">
+                <i class="fa-solid fa-triangle-exclamation" style="flex-shrink:0;"></i>
+                <?= $rs === 'failed' ? 'Extraction failed or validation errors.' : 'Data not yet extracted.' ?>
+                You can enter the data manually below.
             </div>
-            <button type="submit" class="btn-save" style="display:inline-block;">Save Manually</button>
-            <p class="save-msg" id="resume-save-msg"></p>
-        </form>
+
+            <!-- Manual entry form -->
+            <form onsubmit="saveResumeManual(event, <?= $resume_doc['id'] ?>)">
+                <div class="section-label">Personal Information</div>
+                <div class="info-grid" style="margin-bottom:1rem;">
+                    <div class="form-group" style="margin-bottom:0;"><label class="form-label" style="font-size:.78rem;">Name *</label>
+                        <input class="form-control" id="rm-name" placeholder="Full Name" required></div>
+                    <div class="form-group" style="margin-bottom:0;"><label class="form-label" style="font-size:.78rem;">Email *</label>
+                        <input class="form-control" id="rm-email" placeholder="email@example.com" required></div>
+                    <div class="form-group" style="margin-bottom:0;"><label class="form-label" style="font-size:.78rem;">Phone *</label>
+                        <input class="form-control" id="rm-phone" placeholder="+91 XXXXX XXXXX" required></div>
+                    <div class="form-group" style="margin-bottom:0;"><label class="form-label" style="font-size:.78rem;">Education</label>
+                        <input class="form-control" id="rm-education" placeholder="Degree, Institution, Year"></div>
+                    <div class="form-group" style="margin-bottom:0;grid-column:1/-1;"><label class="form-label" style="font-size:.78rem;">Skills</label>
+                        <input class="form-control" id="rm-skills" placeholder="PHP, JavaScript, MySQL…"></div>
+                    <div class="form-group" style="margin-bottom:0;grid-column:1/-1;"><label class="form-label" style="font-size:.78rem;">Address</label>
+                        <input class="form-control" id="rm-address" placeholder="City, State, Country"></div>
+                    <div class="form-group" style="margin-bottom:0;"><label class="form-label" style="font-size:.78rem;">LinkedIn</label>
+                        <input class="form-control" id="rm-linkedin" placeholder="linkedin.com/in/username"></div>
+                    <div class="form-group" style="margin-bottom:0;"><label class="form-label" style="font-size:.78rem;">GitHub</label>
+                        <input class="form-control" id="rm-github" placeholder="github.com/username"></div>
+                </div>
+                <div class="section-label">Latest Experience</div>
+                <div class="info-grid" style="margin-bottom:1.25rem;">
+                    <div class="form-group" style="margin-bottom:0;"><label class="form-label" style="font-size:.78rem;">Company *</label>
+                        <input class="form-control" id="rm-latest_company" placeholder="Company Name" required></div>
+                    <div class="form-group" style="margin-bottom:0;"><label class="form-label" style="font-size:.78rem;">Role *</label>
+                        <input class="form-control" id="rm-latest_role" placeholder="Job Title" required></div>
+                    <div class="form-group" style="margin-bottom:0;"><label class="form-label" style="font-size:.78rem;">Start Date</label>
+                        <input class="form-control" id="rm-latest_start_date" placeholder="Jan 2022"></div>
+                    <div class="form-group" style="margin-bottom:0;"><label class="form-label" style="font-size:.78rem;">End Date</label>
+                        <input class="form-control" id="rm-latest_end_date" placeholder="Dec 2024 or Present"></div>
+                </div>
+                <button type="submit" class="btn btn-primary" id="resume-manual-btn">
+                    <i class="fa-solid fa-floppy-disk"></i> Save Data
+                </button>
+                <p class="save-feedback" id="resume-save-msg"></p>
+            </form>
         <?php endif; ?>
+        </div>
     </div>
     <?php endif; ?>
 
     <!-- Aadhaar Extracted Data -->
     <?php if ($aadhaar_doc): ?>
-    <div class="card">
-        <h2>Aadhaar Extracted Data
+    <div class="card fade-up" style="animation-delay:.15s;">
+        <div class="card-head">
+            <div class="card-title">
+                <div class="card-icon" style="background:#F0FDF4;color:#059669;"><i class="fa-solid fa-fingerprint"></i></div>
+                Aadhaar Extracted Data
+            </div>
             <?php
                 $status = $aadhaar_doc['processed_status'];
-                if ($status === 'done')         echo '<span class="badge-done" style="margin-left:0.5rem;">✔ Verified</span>';
-                elseif ($status === 'failed')   echo '<span class="badge-failed" style="margin-left:0.5rem;">✗ Failed</span>';
-                elseif ($status === 'skipped')  echo '<span class="badge-skipped" style="margin-left:0.5rem;">— Skipped</span>';
-                else                            echo '<span class="badge-pending" style="margin-left:0.5rem;">Pending</span>';
+                $blur   = $aadhaar_doc['blur_status'];
+                if ($status === 'done')        echo '<span class="badge badge-success"><i class="fa-solid fa-circle-check"></i> Verified</span>';
+                elseif ($status === 'failed')  echo '<span class="badge badge-danger"><i class="fa-solid fa-xmark"></i> Failed</span>';
+                else                           echo '<span class="badge badge-neutral"><i class="fa-solid fa-clock"></i> ' . ucfirst($status) . '</span>';
             ?>
-        </h2>
+        </div>
+        <div class="card-body">
 
         <?php if ($aadhaar_data): ?>
-        <div class="aadhaar-grid">
-            <div class="info-item">
-                <label>Aadhaar Number</label>
-                <span class="field-view" id="view-aadhaar_number"><?= htmlspecialchars($aadhaar_data['aadhaar_number']) ?></span>
-                <input class="field-edit" id="edit-aadhaar_number" type="text" value="<?= htmlspecialchars($aadhaar_data['aadhaar_number']) ?>" placeholder="XXXX XXXX XXXX">
+            <div class="info-grid" style="margin-bottom:1.25rem;" id="aadhaar-view">
+                <div>
+                    <span class="info-label">Aadhaar Number</span>
+                    <span class="field-view" id="view-aadhaar_number">
+                        <?= htmlspecialchars(implode(' ', str_split($aadhaar_data['aadhaar_number'], 4))) ?>
+                    </span>
+                    <input class="field-edit" id="edit-aadhaar_number"
+                           value="<?= htmlspecialchars($aadhaar_data['aadhaar_number']) ?>" placeholder="XXXX XXXX XXXX">
+                </div>
+                <div>
+                    <span class="info-label">Name on Card</span>
+                    <span class="field-view" id="view-name"><?= htmlspecialchars($aadhaar_data['name']) ?></span>
+                    <input class="field-edit" id="edit-name"
+                           value="<?= htmlspecialchars($aadhaar_data['name']) ?>" placeholder="Full Name">
+                </div>
+                <div>
+                    <span class="info-label">Date of Birth</span>
+                    <span class="field-view" id="view-dob"><?= htmlspecialchars($aadhaar_data['dob']) ?></span>
+                    <input class="field-edit" id="edit-dob"
+                           value="<?= htmlspecialchars($aadhaar_data['dob']) ?>" placeholder="DD/MM/YYYY">
+                </div>
+                <div>
+                    <span class="info-label">Blur Status</span>
+                    <span class="info-val">
+                        <?php
+                        if ($blur === 'clear')   echo '<span class="badge badge-success"><i class="fa-solid fa-circle-check"></i> Clear</span>';
+                        elseif ($blur === 'blurry') echo '<span class="badge badge-danger"><i class="fa-solid fa-triangle-exclamation"></i> Blurry</span>';
+                        else echo '<span class="badge badge-neutral">' . ucfirst($blur) . '</span>';
+                        ?>
+                    </span>
+                </div>
+                <div>
+                    <span class="info-label">Extracted On</span>
+                    <span class="info-val"><?= date('d M Y', strtotime($aadhaar_data['extracted_at'])) ?></span>
+                </div>
             </div>
-            <div class="info-item">
-                <label>Name</label>
-                <span class="field-view" id="view-name"><?= htmlspecialchars($aadhaar_data['name']) ?></span>
-                <input class="field-edit" id="edit-name" type="text" value="<?= htmlspecialchars($aadhaar_data['name']) ?>" placeholder="Full Name">
-            </div>
-            <div class="info-item">
-                <label>Date of Birth</label>
-                <span class="field-view" id="view-dob"><?= htmlspecialchars($aadhaar_data['dob']) ?></span>
-                <input class="field-edit" id="edit-dob" type="text" value="<?= htmlspecialchars($aadhaar_data['dob']) ?>" placeholder="DD/MM/YYYY">
-            </div>
-        </div>
 
-        <div class="edit-actions">
-            <button class="btn-edit" onclick="startEdit()">✎ Edit</button>
-            <button class="btn-save" onclick="saveEdit(<?= $aadhaar_data['id'] ?>)">Save</button>
-            <button class="btn-cancel" onclick="cancelEdit()">Cancel</button>
-        </div>
-        <p class="save-msg" id="save-msg"></p>
+            <div class="edit-actions">
+                <button class="btn btn-ghost btn-sm" onclick="startEdit()" id="btn-edit-aadhaar">
+                    <i class="fa-solid fa-pen"></i> Edit
+                </button>
+                <button class="btn btn-primary btn-sm" onclick="saveEdit(<?= $aadhaar_data['id'] ?>)" id="btn-save-aadhaar" style="display:none;">
+                    <i class="fa-solid fa-floppy-disk"></i> Save Changes
+                </button>
+                <button class="btn btn-ghost btn-sm" onclick="cancelEdit()" id="btn-cancel-aadhaar" style="display:none;">
+                    <i class="fa-solid fa-xmark"></i> Cancel
+                </button>
+            </div>
+            <p class="save-feedback" id="aadhaar-save-msg"></p>
 
         <?php else: ?>
-        <p style="font-size:0.9rem;color:#888;">
-            <?php if ($status === 'failed'): ?>
-                OCR extraction failed or data could not be validated. You can enter the data manually below.
-            <?php elseif ($status === 'skipped'): ?>
-                Blur check was skipped (PDF). Data not yet extracted. You can enter the data manually below.
-            <?php else: ?>
-                Data not yet extracted.
-            <?php endif; ?>
-        </p>
-
-        <!-- Manual entry form -->
-        <form id="manual-form" style="margin-top:1rem;" onsubmit="saveManual(event, <?= $aadhaar_doc['id'] ?>)">
-            <div class="aadhaar-grid" style="margin-bottom:1rem;">
-                <div class="info-item">
-                    <label>Aadhaar Number</label>
-                    <input class="field-edit" style="display:block;" id="manual-aadhaar_number" type="text" placeholder="XXXX XXXX XXXX" required>
-                </div>
-                <div class="info-item">
-                    <label>Name</label>
-                    <input class="field-edit" style="display:block;" id="manual-name" type="text" placeholder="Full Name" required>
-                </div>
-                <div class="info-item">
-                    <label>Date of Birth</label>
-                    <input class="field-edit" style="display:block;" id="manual-dob" type="text" placeholder="DD/MM/YYYY" required>
-                </div>
+            <div class="alert alert-warning" style="margin-bottom:1.25rem;">
+                <i class="fa-solid fa-triangle-exclamation" style="flex-shrink:0;"></i>
+                <?php
+                if ($status === 'failed')     echo 'OCR extraction failed or data could not be validated.';
+                elseif ($blur === 'blurry')   echo 'Image is blurry — re-upload a clearer image or enter data manually.';
+                elseif ($status === 'skipped'||$blur === 'skipped') echo 'Blur check was skipped (PDF uploaded).';
+                else                          echo 'Data not yet extracted.';
+                ?>
+                Enter the data manually below.
             </div>
-            <button type="submit" class="btn-save" style="display:inline-block;">Save Manually</button>
-            <p class="save-msg" id="save-msg"></p>
-        </form>
+
+            <!-- Manual form -->
+            <form id="manual-aadhaar-form" onsubmit="saveManual(event, <?= $aadhaar_doc['id'] ?>)">
+                <div class="info-grid" style="margin-bottom:1.25rem;">
+                    <div class="form-group" style="margin-bottom:0;"><label class="form-label" style="font-size:.78rem;">Aadhaar Number *</label>
+                        <input class="form-control" id="manual-aadhaar_number" placeholder="XXXX XXXX XXXX" required></div>
+                    <div class="form-group" style="margin-bottom:0;"><label class="form-label" style="font-size:.78rem;">Name *</label>
+                        <input class="form-control" id="manual-name" placeholder="Full Name" required></div>
+                    <div class="form-group" style="margin-bottom:0;"><label class="form-label" style="font-size:.78rem;">Date of Birth *</label>
+                        <input class="form-control" id="manual-dob" placeholder="DD/MM/YYYY" required></div>
+                </div>
+                <button type="submit" class="btn btn-primary" id="aadhaar-manual-btn">
+                    <i class="fa-solid fa-floppy-disk"></i> Save Aadhaar Data
+                </button>
+                <p class="save-feedback" id="aadhaar-manual-msg"></p>
+            </form>
         <?php endif; ?>
+        </div>
     </div>
     <?php endif; ?>
 
     <!-- PDF Report -->
     <?php if ($aadhaar_doc && $aadhaar_doc['processed_status'] === 'done'): ?>
-    <div class="card">
-        <h2>PDF Report</h2>
-
-        <?php if ($report_generated): ?>
-            <p style="color:#27ae60;font-size:0.9rem;margin-bottom:0.8rem;">✔ Report generated successfully.</p>
-        <?php endif; ?>
-
-        <div style="display:flex;gap:0.8rem;align-items:center;flex-wrap:wrap;">
-            <a href="generate_report.php?id=<?= $id ?>"
-               style="padding:0.55rem 1.1rem;background:#4a90e2;color:#fff;border-radius:5px;text-decoration:none;font-size:0.9rem;">
-                ⬇ Generate &amp; Download PDF
-            </a>
-
+    <div class="card fade-up" style="animation-delay:.2s;">
+        <div class="card-head">
+            <div class="card-title">
+                <div class="card-icon" style="background:#FEF2F2;color:#DC2626;"><i class="fa-solid fa-file-pdf"></i></div>
+                PDF Report
+            </div>
             <?php if ($pdf_report): ?>
-                <a href="../<?= htmlspecialchars($pdf_report['pdf_path']) ?>" download
-                   style="padding:0.55rem 1.1rem;background:#fff;color:#4a90e2;border:1px solid #4a90e2;border-radius:5px;text-decoration:none;font-size:0.9rem;">
-                    Last Report (<?= date('d M Y', strtotime($pdf_report['generated_at'])) ?>)
-                </a>
+            <span class="badge badge-success">
+                <i class="fa-solid fa-circle-check"></i>
+                Generated <?= date('d M Y', strtotime($pdf_report['generated_at'])) ?>
+            </span>
             <?php endif; ?>
+        </div>
+        <div class="card-body">
+            <p style="font-size:.875rem;color:var(--text-2);margin-bottom:1.1rem;">
+                Generate a comprehensive PDF report containing candidate information, Aadhaar details, and resume data.
+            </p>
+            <div style="display:flex;gap:.75rem;flex-wrap:wrap;">
+                <a href="generate_report.php?id=<?= $id ?>" class="btn btn-primary">
+                    <i class="fa-solid fa-rotate"></i> Generate &amp; Download
+                </a>
+                <?php if ($pdf_report): ?>
+                <a href="../<?= htmlspecialchars($pdf_report['pdf_path']) ?>" download class="btn btn-outline">
+                    <i class="fa-solid fa-download"></i> Last Report
+                </a>
+                <?php endif; ?>
+            </div>
         </div>
     </div>
     <?php endif; ?>
 
     <!-- Magic Link -->
-    <div class="card">
-        <h2>Magic Upload Link</h2>
-        <p style="font-size:0.9rem;color:#666;">Share this link with the candidate to upload documents.</p>
-        <div class="link-box">
-            <input type="text" id="magic-link" value="<?= htmlspecialchars($magic_link) ?>" readonly>
-            <button onclick="copyLink()">Copy</button>
+    <div class="card fade-up" style="animation-delay:.25s;">
+        <div class="card-head">
+            <div class="card-title">
+                <div class="card-icon"><i class="fa-solid fa-link"></i></div>
+                Magic Upload Link
+            </div>
         </div>
-        <p class="copied" id="copied-msg">Copied!</p>
+        <div class="card-body">
+            <p style="font-size:.875rem;color:var(--text-2);margin-bottom:.9rem;">
+                Share this link with the candidate to let them upload or re-upload documents.
+            </p>
+            <div class="link-box">
+                <input type="text" id="magic-link" value="<?= htmlspecialchars($magic_link) ?>" readonly>
+                <button onclick="copyLink()"><i class="fa-regular fa-copy"></i> Copy</button>
+            </div>
+            <p id="copied-msg" style="font-size:.8rem;color:var(--success);margin-top:.4rem;height:1rem;
+               display:flex;align-items:center;gap:.3rem;"></p>
+        </div>
     </div>
 
-</div>
+</div><!-- page-md -->
 
 <script>
+/* ── Copy link ── */
 function copyLink() {
-    const input = document.getElementById('magic-link');
-    input.select();
+    document.getElementById('magic-link').select();
     document.execCommand('copy');
     const msg = document.getElementById('copied-msg');
-    msg.style.display = 'block';
-    setTimeout(() => msg.style.display = 'none', 2000);
+    msg.innerHTML = '<i class="fa-solid fa-circle-check"></i> Copied to clipboard!';
+    setTimeout(() => msg.innerHTML = '', 2500);
 }
 
+/* ── Aadhaar inline edit ── */
 function startEdit() {
-    ['aadhaar_number', 'name', 'dob'].forEach(f => {
+    ['aadhaar_number','name','dob'].forEach(f => {
         document.getElementById('view-' + f).style.display = 'none';
         document.getElementById('edit-' + f).style.display = 'block';
     });
-    document.querySelector('.btn-edit').style.display  = 'none';
-    document.querySelector('.btn-save').style.display  = 'inline-block';
-    document.querySelector('.btn-cancel').style.display = 'inline-block';
+    document.getElementById('btn-edit-aadhaar').style.display   = 'none';
+    document.getElementById('btn-save-aadhaar').style.display   = 'inline-flex';
+    document.getElementById('btn-cancel-aadhaar').style.display = 'inline-flex';
 }
 
 function cancelEdit() {
-    ['aadhaar_number', 'name', 'dob'].forEach(f => {
+    ['aadhaar_number','name','dob'].forEach(f => {
         const view = document.getElementById('view-' + f);
         const edit = document.getElementById('edit-' + f);
-        edit.value = view.textContent.trim();
-        view.style.display = 'block';
-        edit.style.display  = 'none';
+        edit.value = view.textContent.trim().replace(/\s+/g,' ');
+        view.style.display = '';
+        edit.style.display = 'none';
     });
-    document.querySelector('.btn-edit').style.display   = 'inline-block';
-    document.querySelector('.btn-save').style.display   = 'none';
-    document.querySelector('.btn-cancel').style.display = 'none';
-    document.getElementById('save-msg').style.display   = 'none';
+    document.getElementById('btn-edit-aadhaar').style.display   = 'inline-flex';
+    document.getElementById('btn-save-aadhaar').style.display   = 'none';
+    document.getElementById('btn-cancel-aadhaar').style.display = 'none';
+    const m = document.getElementById('aadhaar-save-msg');
+    m.style.display = 'none';
 }
 
-async function saveEdit(aadhaar_data_id) {
-    const btn = document.querySelector('.btn-save');
-    const msg = document.getElementById('save-msg');
-    btn.disabled = true;
-    btn.textContent = 'Saving...';
+async function saveEdit(id) {
+    const btn = document.getElementById('btn-save-aadhaar');
+    const msg = document.getElementById('aadhaar-save-msg');
+    btn.innerHTML = '<span class="spinner"></span> Saving…';
+    btn.disabled  = true;
 
     const body = new FormData();
-    body.append('aadhaar_data_id', aadhaar_data_id);
+    body.append('aadhaar_data_id', id);
     body.append('aadhaar_number',  document.getElementById('edit-aadhaar_number').value.trim());
     body.append('name',            document.getElementById('edit-name').value.trim());
     body.append('dob',             document.getElementById('edit-dob').value.trim());
 
-    const res  = await fetch('update_aadhaar_data.php', { method: 'POST', body });
-    const text = await res.text();
-
-    btn.disabled = false;
-    btn.textContent = 'Save';
+    const text = await fetch('update_aadhaar_data.php', { method:'POST', body }).then(r => r.text());
+    btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save Changes';
+    btn.disabled  = false;
 
     if (text.trim() === 'ok') {
-        ['aadhaar_number', 'name', 'dob'].forEach(f => {
-            const val = document.getElementById('edit-' + f).value.trim();
-            document.getElementById('view-' + f).textContent = val;
+        ['aadhaar_number','name','dob'].forEach(f => {
+            document.getElementById('view-' + f).textContent = document.getElementById('edit-' + f).value.trim();
         });
         cancelEdit();
-        msg.className = 'save-msg success';
-        msg.textContent = '✔ Data updated successfully.';
-        msg.style.display = 'block';
+        msg.className = 'save-feedback ok';
+        msg.innerHTML = '<i class="fa-solid fa-circle-check"></i> Data updated successfully.';
+        msg.style.display = 'flex';
         setTimeout(() => msg.style.display = 'none', 3000);
     } else {
-        msg.className = 'save-msg error';
+        msg.className = 'save-feedback err';
         msg.textContent = text.trim() || 'Failed to save. Please try again.';
         msg.style.display = 'block';
     }
 }
 
-async function saveResumeManual(e, document_id) {
-    e.preventDefault();
-    const btn = e.target.querySelector('button[type="submit"]');
-    const msg = document.getElementById('resume-save-msg');
-    btn.disabled = true; btn.textContent = 'Saving...';
-
-    const body = new FormData();
-    body.append('document_id',        document_id);
-    ['name','email','phone','skills','education',
-     'latest_company','latest_role','latest_start_date','latest_end_date',
-     'address','linkedin','github'].forEach(f => {
-        const el = document.getElementById('rm-' + f);
-        if (el) body.append(f, el.value.trim());
-    });
-
-    const res  = await fetch('update_resume_data.php', { method: 'POST', body });
-    const text = await res.text();
-    btn.disabled = false; btn.textContent = 'Save Manually';
-
-    if (text.trim() === 'ok') {
-        location.reload();
-    } else {
-        msg.className = 'save-msg error';
-        msg.textContent = text.trim() || 'Failed to save.';
-        msg.style.display = 'block';
-    }
-}
-
+/* ── Aadhaar manual ── */
 async function saveManual(e, document_id) {
     e.preventDefault();
-    const btn = e.target.querySelector('button[type="submit"]');
-    const msg = document.getElementById('save-msg');
-    btn.disabled = true;
-    btn.textContent = 'Saving...';
+    const btn = document.getElementById('aadhaar-manual-btn');
+    const msg = document.getElementById('aadhaar-manual-msg');
+    btn.innerHTML = '<span class="spinner"></span> Saving…';
+    btn.disabled  = true;
 
     const body = new FormData();
     body.append('document_id',    document_id);
@@ -717,17 +602,45 @@ async function saveManual(e, document_id) {
     body.append('name',           document.getElementById('manual-name').value.trim());
     body.append('dob',            document.getElementById('manual-dob').value.trim());
 
-    const res  = await fetch('update_aadhaar_data.php', { method: 'POST', body });
-    const text = await res.text();
-
-    btn.disabled = false;
-    btn.textContent = 'Save Manually';
+    const text = await fetch('update_aadhaar_data.php', { method:'POST', body }).then(r => r.text());
+    btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save Aadhaar Data';
+    btn.disabled  = false;
 
     if (text.trim() === 'ok') {
         location.reload();
     } else {
-        msg.className = 'save-msg error';
-        msg.textContent = text.trim() || 'Failed to save. Please try again.';
+        msg.className = 'save-feedback err';
+        msg.textContent = text.trim() || 'Failed to save.';
+        msg.style.display = 'block';
+    }
+}
+
+/* ── Resume manual ── */
+async function saveResumeManual(e, document_id) {
+    e.preventDefault();
+    const btn = document.getElementById('resume-manual-btn');
+    const msg = document.getElementById('resume-save-msg');
+    btn.innerHTML = '<span class="spinner"></span> Saving…';
+    btn.disabled  = true;
+
+    const body = new FormData();
+    body.append('document_id', document_id);
+    ['name','email','phone','skills','education',
+     'latest_company','latest_role','latest_start_date','latest_end_date',
+     'address','linkedin','github'].forEach(f => {
+        const el = document.getElementById('rm-' + f);
+        if (el) body.append(f, el.value.trim());
+    });
+
+    const text = await fetch('update_resume_data.php', { method:'POST', body }).then(r => r.text());
+    btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save Data';
+    btn.disabled  = false;
+
+    if (text.trim() === 'ok') {
+        location.reload();
+    } else {
+        msg.className = 'save-feedback err';
+        msg.textContent = text.trim() || 'Failed to save.';
         msg.style.display = 'block';
     }
 }
